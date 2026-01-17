@@ -1,6 +1,8 @@
-# Gmail Skill for Claude Code
+# Gmail Skill with Recursive Language Models support for Claude Code
 
-A Claude Code skill that provides direct Gmail API integration for reading, searching, sending emails, and managing labels.
+A Claude Code skill that provides direct Gmail API integration for reading, searching, sending emails, and managing.
+
+This Skill can make your Gmail behave a Datastore allowing you to querry it.
 
 ## Features
 
