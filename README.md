@@ -7,6 +7,8 @@ A Claude Code skill that provides direct Gmail API integration for reading, sear
 - **Read & Search Emails:** Powerful Gmail search syntax with flexible output formats
 - **Send Emails:** Compose and send emails with attachments
 - **Manage Labels:** Create labels and organize emails
+- **RLM Mode:** Large-scale email analysis with recursive LLM sub-queries (1000+ emails)
+- **Bulk Operations:** Process large email datasets with pagination
 - **Direct API Integration:** No MCP server required - uses standalone Python scripts
 - **OAuth2 Authentication:** Secure browser-based authentication flow
 - **Auto Token Refresh:** Tokens refresh automatically, no manual intervention needed
@@ -19,10 +21,11 @@ A Claude Code skill that provides direct Gmail API integration for reading, sear
 4. [Authentication](#authentication)
 5. [Usage with Claude Code](#usage-with-claude-code)
 6. [Usage Examples](#usage-examples)
-7. [Project Structure](#project-structure)
-8. [How It Works](#how-it-works)
-9. [Troubleshooting](#troubleshooting)
-10. [Learning Resources](#learning-resources)
+7. [RLM Mode](#rlm-mode)
+8. [Project Structure](#project-structure)
+9. [How It Works](#how-it-works)
+10. [Troubleshooting](#troubleshooting)
+11. [Learning Resources](#learning-resources)
 
 ## Prerequisites
 
@@ -35,7 +38,7 @@ A Claude Code skill that provides direct Gmail API integration for reading, sear
 
 1. **Clone or download this repository:**
    ```bash
-   cd /Users/**/work/gmail_skill
+   cd <project-dir>
    ```
 
 2. **Install Python dependencies:**
@@ -102,12 +105,12 @@ Before using the skill, you must create OAuth2 credentials in Google Cloud Conso
 6. **Place Credentials File:**
    ```bash
    # Move downloaded credentials file to the credentials directory
-   mv ~/Downloads/client_secret_*.json /Users/**/work/gmail_skill/credentials/credentials.json
+   mv ~/Downloads/client_secret_*.json <project-dir>/credentials/credentials.json
    ```
 
    Or if it's already named credentials.json:
    ```bash
-   mv ~/Downloads/credentials.json /Users/**/work/gmail_skill/credentials/credentials.json
+   mv ~/Downloads/credentials.json <project-dir>/credentials/credentials.json
    ```
 
 ## Authentication
@@ -115,7 +118,7 @@ Before using the skill, you must create OAuth2 credentials in Google Cloud Conso
 After placing the credentials file, run the one-time authentication:
 
 ```bash
-python /Users/**/work/gmail_skill/skills/gmail/scripts/gmail_auth.py
+python <project-dir>/skills/gmail/scripts/gmail_auth.py
 ```
 
 **What happens:**
@@ -136,7 +139,7 @@ python /Users/**/work/gmail_skill/skills/gmail/scripts/gmail_auth.py
   "message": "Authentication successful",
   "email": "your.email@gmail.com",
   "scopes": ["https://www.googleapis.com/auth/gmail.modify"],
-  "token_file": "/Users/**/work/gmail_skill/credentials/token.json"
+  "token_file": "<project-dir>/credentials/token.json"
 }
 ```
 
@@ -150,7 +153,7 @@ Once authenticated, you can use this skill with Claude Code in two ways:
 
 ```bash
 # Start Claude Code with this plugin
-cc --plugin-dir /Users/**/work/gmail_skill
+cc --plugin-dir <project-dir>
 
 # Then ask Claude:
 # "Check my unread emails"
@@ -162,7 +165,7 @@ cc --plugin-dir /Users/**/work/gmail_skill
 
 Copy to Claude Code plugins directory (when supported):
 ```bash
-cp -r /Users/**/work/gmail_skill ~/.claude/plugins/gmail-skill
+cp -r <project-dir> ~/.claude/plugins/gmail-skill
 ```
 
 ## Usage Examples
@@ -211,6 +214,72 @@ Once installed, Claude will auto-discover and use this skill when you mention Gm
 "Label all emails about ProjectX with a ProjectX label"
 ```
 
+## RLM Mode
+
+RLM (Recursive Language Model) mode enables large-scale email analysis by combining bulk email fetching with parallel LLM sub-queries. Use this when working with 1000+ emails or when you need complex analysis that would be too large for a single context window.
+
+### When to Use RLM Mode
+
+- Analyzing large email datasets (100+ emails)
+- Complex aggregation or categorization tasks
+- When you need to break down analysis into smaller chunks
+- Pattern detection across many emails
+
+### RLM Scripts
+
+```bash
+# Bulk read - fetch large email datasets with pagination
+.venv/bin/python skills/gmail/scripts/gmail_bulk_read.py --query "newer_than:30d" --max-results 500
+
+# RLM REPL - Python environment with LLM sub-query capabilities
+.venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py --query "newer_than:7d" --max-results 200 --code "
+by_sender = chunk_by_sender(emails)
+FINAL(str(len(by_sender)) + ' unique senders')
+"
+```
+
+### RLM Built-in Functions
+
+**LLM Query Functions:**
+- `llm_query(prompt, context, model=None, json_output=False)` - Make recursive LLM call
+- `parallel_llm_query(prompts, max_workers=5)` - Concurrent LLM calls
+- `parallel_map(prompt, chunks, context_fn, max_workers=5)` - Apply prompt to chunks
+
+**Chunking Functions:**
+- `chunk_by_size(emails, size=50)` - Group by count
+- `chunk_by_sender(emails)` - Group by sender
+- `chunk_by_date(emails, days=1)` - Group by date
+- `chunk_by_thread(emails)` - Group by thread
+
+**Filtering Functions:**
+- `filter_by_keyword(emails, pattern)` - Filter by keyword regex
+- `filter_by_sender(emails, pattern)` - Filter by sender regex
+
+**Output Functions:**
+- `FINAL(result)` - Output final result
+- `FINAL_VAR(var)` - Output variable as final result
+- `get_session()` - Get session stats (token usage, call count)
+
+### RLM Example
+
+```bash
+# Analyze emails by sender and summarize
+.venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
+  --query "newer_than:7d" \
+  --max-results 500 \
+  --code "
+chunks = chunk_by_sender(emails)
+summaries = parallel_map(
+    'Summarize the key topics in these emails',
+    list(chunks.values())[:10],
+    lambda chunk: '\\n'.join([e['subject'] for e in chunk])
+)
+FINAL(summaries)
+"
+```
+
+**Note:** RLM mode requires the `ANTHROPIC_API_KEY` environment variable to be set.
+
 ## Project Structure
 
 ```
@@ -225,11 +294,16 @@ gmail_skill/
 │   └── gmail/
 │       ├── SKILL.md               # Main skill definition (Claude loads this)
 │       ├── scripts/
+│       │   ├── __init__.py        # Package marker
 │       │   ├── gmail_common.py    # Shared OAuth & utility functions
 │       │   ├── gmail_auth.py      # OAuth2 setup script
 │       │   ├── gmail_read.py      # Read/search emails script
 │       │   ├── gmail_send.py      # Send emails script
-│       │   └── gmail_labels.py    # Label management script
+│       │   ├── gmail_labels.py    # Label management script
+│       │   ├── gmail_mark_read.py # Mark emails as read
+│       │   ├── gmail_bulk_read.py # Pagination for 1000+ emails
+│       │   ├── gmail_rlm_repl.py  # RLM Python REPL environment
+│       │   └── gmail_rlm_helpers.py # RLM chunking/filtering helpers
 │       ├── references/
 │       │   ├── api-reference.md   # Gmail API technical details
 │       │   └── troubleshooting.md # Common issues and solutions
@@ -408,5 +482,5 @@ For issues or questions:
 
 **Built as a learning project to understand Claude Code Skills architecture.**
 
-Version: 0.1.0
-Last Updated: 2026-01-15
+Version: 0.2.0
+Last Updated: 2026-01-18

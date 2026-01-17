@@ -1,6 +1,6 @@
 [project]
 name = "gmail-skill"
-version = "0.1.0"
+version = "0.2.0"
 description = "Claude Code skill for Gmail operations via Google APIs - read, search, send emails, and manage labels"
 readme = "README.md"
 requires-python = ">=3.12"
