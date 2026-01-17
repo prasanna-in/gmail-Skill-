@@ -1,12 +1,39 @@
 ---
 name: gmail
 description: Use when the user asks to "read my email", "search my gmail", "send an email", "check my inbox", "manage gmail labels", "organize my email", or mentions Gmail operations like reading messages, composing emails, searching for emails, or managing folders/labels. Provides direct Gmail API integration for email reading, sending, and label management on personal Gmail accounts.
-version: 0.1.0
+version: 0.2.0
 ---
 
 # Gmail Integration Skill
 
 This skill provides direct Gmail API integration for reading, searching, sending emails, and managing labels. All operations use standalone Python scripts that return JSON output for easy parsing.
+
+## Operating Modes
+
+This skill supports two modes of operation:
+
+### Normal Mode (Default)
+For typical email tasks - reading specific emails, sending messages, managing labels.
+- Max 100 emails per query
+- Direct, simple operations
+- Best for: specific lookups, sending, labeling
+
+### RLM Mode (Recursive Language Model)
+For large-scale email analysis - processing 100+ emails with complex workflows.
+- Pagination for 1000+ emails
+- Recursive LLM sub-queries to avoid context overflow
+- Best for: inbox summaries, trend analysis, bulk classification
+
+**Mode Selection Guidelines:**
+
+| Scenario | Mode | Reason |
+|----------|------|--------|
+| Check 10 unread emails | Normal | Small dataset, simple task |
+| Send an email | Normal | Single operation |
+| Summarize last month's inbox | **RLM** | 100+ emails, needs aggregation |
+| Find action items across 500 emails | **RLM** | Complex analysis, chunking needed |
+| Apply label to 5 messages | Normal | Simple batch operation |
+| Categorize all emails by sender | **RLM** | Multi-step classification |
 
 ## Prerequisites & Setup
 
@@ -339,7 +366,203 @@ Error types:
 - **API Reference:** [references/api-reference.md](references/api-reference.md) - Complete Gmail API details
 - **Troubleshooting:** [references/troubleshooting.md](references/troubleshooting.md) - Common issues and solutions
 - **Search Examples:** [examples/search-examples.md](examples/search-examples.md) - Comprehensive query patterns
+- **RLM Patterns:** [references/rlm-patterns.md](references/rlm-patterns.md) - Recursive analysis examples
 - **Google Documentation:** https://developers.google.com/gmail/api
+
+---
+
+## RLM Mode Operations
+
+RLM (Recursive Language Model) mode enables large-scale email analysis by:
+1. Fetching emails with pagination (1000+)
+2. Loading data into a Python REPL environment
+3. Using recursive LLM calls to process chunks
+4. Aggregating results into a final answer
+
+### When to Use RLM Mode
+
+Use RLM mode when:
+- Analyzing 100+ emails
+- User requests summary of large time periods ("summarize my inbox this month")
+- Complex multi-step workflows are needed
+- Action item extraction across many emails
+- Email classification or categorization tasks
+- Trend analysis or pattern detection
+
+### Bulk Read (Pagination)
+
+Use `gmail_bulk_read.py` to fetch large numbers of emails:
+
+```bash
+python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_bulk_read.py \
+  --query "newer_than:30d" \
+  --max-results 500 \
+  --format metadata \
+  --output-file /tmp/emails.json
+```
+
+**Arguments:**
+- `--query`: Gmail search query (required)
+- `--max-results`: Number of emails (default: 500, recommended max: 1000)
+- `--format`: Output detail level (minimal, metadata, full)
+- `--output-file`: Save to file instead of stdout (recommended for large results)
+- `--quiet`: Suppress progress messages
+
+**Output:** Same JSON format as `gmail_read.py`, with pagination metadata.
+
+### RLM REPL Environment
+
+Use `gmail_rlm_repl.py` for recursive email analysis:
+
+```bash
+python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_rlm_repl.py \
+  --query "is:unread" \
+  --max-results 200 \
+  --code "
+# Group emails by sender
+by_sender = chunk_by_sender(emails)
+
+# Summarize top 5 senders
+summaries = []
+for sender, msgs in list(by_sender.items())[:5]:
+    summary = llm_query(
+        f'Summarize emails from {sender}',
+        context=str([m['snippet'] for m in msgs])
+    )
+    summaries.append(f'{sender}: {summary}')
+
+FINAL('\\n'.join(summaries))
+"
+```
+
+**Arguments:**
+- `--query`: Gmail search query (OR use --load-file)
+- `--load-file`: Load emails from JSON file (from gmail_bulk_read.py)
+- `--max-results`: Maximum emails to fetch (default: 200)
+- `--format`: Email format (minimal, metadata, full)
+- `--code`: Python code to execute in RLM environment
+- `--code-file`: Load code from file instead
+
+### Built-in Variables
+
+| Variable | Description |
+|----------|-------------|
+| `emails` | List of email dicts: id, threadId, subject, from, to, date, snippet, body |
+| `metadata` | Query metadata: query, count, format |
+
+### Built-in Functions
+
+**Core Functions:**
+| Function | Description |
+|----------|-------------|
+| `llm_query(prompt, context)` | Recursive LLM call via Claude CLI |
+| `FINAL(result)` | Output final result (string) |
+| `FINAL_VAR(var_name)` | Output variable as JSON |
+
+**Chunking Functions:**
+| Function | Description |
+|----------|-------------|
+| `chunk_by_size(emails, n)` | Split into n-sized chunks |
+| `chunk_by_sender(emails)` | Group by sender email address |
+| `chunk_by_sender_domain(emails)` | Group by sender domain |
+| `chunk_by_date(emails, period)` | Group by 'day', 'week', or 'month' |
+| `chunk_by_thread(emails)` | Group by thread ID |
+
+**Filter Functions:**
+| Function | Description |
+|----------|-------------|
+| `filter_emails(emails, predicate)` | Filter with custom function |
+| `filter_by_keyword(emails, kw)` | Filter by keyword in subject/snippet/body |
+| `filter_by_sender(emails, pattern)` | Filter by sender pattern |
+
+**Utility Functions:**
+| Function | Description |
+|----------|-------------|
+| `sort_emails(emails, by, reverse)` | Sort by field |
+| `get_top_senders(emails, n)` | Get top N senders by count |
+| `extract_email_summary(email)` | Text summary of one email |
+| `batch_extract_summaries(emails, max_chars)` | Combined summary with char limit |
+| `aggregate_results(results, separator)` | Combine multiple results |
+
+### RLM Example: Inbox Summary
+
+Summarize 200 emails by sender:
+
+```bash
+python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_rlm_repl.py \
+  --query "newer_than:7d" \
+  --max-results 200 \
+  --code "
+by_sender = chunk_by_sender(emails)
+top = sorted(by_sender.items(), key=lambda x: -len(x[1]))[:10]
+
+summaries = []
+for sender, msgs in top:
+    summary = llm_query(
+        f'What is {sender} emailing about?',
+        context=str([m['snippet'] for m in msgs[:10]])
+    )
+    summaries.append(f'**{sender}** ({len(msgs)}): {summary}')
+
+FINAL('## Weekly Inbox Summary\\n\\n' + '\\n\\n'.join(summaries))
+"
+```
+
+### RLM Example: Action Items
+
+Extract action items from many emails:
+
+```bash
+python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_rlm_repl.py \
+  --query "newer_than:14d" \
+  --max-results 300 \
+  --code "
+all_items = []
+for chunk in chunk_by_size(emails, 20):
+    items = llm_query(
+        'Extract action items. Format: - [ACTION]. Return None if no actions.',
+        context=str([{'from': e['from'], 'subject': e['subject'], 'snippet': e['snippet']} for e in chunk])
+    )
+    if items.strip().lower() != 'none':
+        all_items.append(items)
+
+if all_items:
+    final = llm_query('Prioritize these action items:', context='\\n'.join(all_items))
+    FINAL(final)
+else:
+    FINAL('No action items found.')
+"
+```
+
+### RLM Example: Email Classification
+
+Categorize emails:
+
+```bash
+python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_rlm_repl.py \
+  --query "is:unread" \
+  --max-results 100 \
+  --code "
+categories = {'urgent': [], 'action_required': [], 'fyi': [], 'other': []}
+
+for email in emails:
+    cat = llm_query(
+        'Classify: urgent, action_required, fyi, or other. Reply with just the category.',
+        context=f\"From: {email['from']}\\nSubject: {email['subject']}\\nPreview: {email['snippet']}\"
+    ).strip().lower()
+
+    if cat in categories:
+        categories[cat].append(email['id'])
+    else:
+        categories['other'].append(email['id'])
+
+FINAL_VAR('categories')
+"
+```
+
+For more RLM patterns and examples, see [references/rlm-patterns.md](references/rlm-patterns.md).
+
+---
 
 ## Implementation Notes
 
@@ -371,7 +594,14 @@ Error types:
 
 ## Skill Version
 
-Version: 0.1.0
-Last Updated: 2026-01-15
+Version: 0.2.0
+Last Updated: 2026-01-17
+
+**Changelog:**
+- 0.2.0: Added RLM (Recursive Language Model) mode for large-scale email analysis
+  - `gmail_bulk_read.py` - Pagination for 1000+ emails
+  - `gmail_rlm_repl.py` - Python REPL with recursive LLM calls
+  - `gmail_rlm_helpers.py` - Chunking and aggregation utilities
+- 0.1.0: Initial release with read, send, and label operations
 
 For skill updates or issues, check the project README.
