@@ -33,7 +33,7 @@ This guide covers common issues and their solutions when using the Gmail skill.
 
 1. Ensure `credentials.json` exists in the credentials directory:
    ```bash
-   ls /Users/pk/work/gmail_skill/credentials/credentials.json
+   ls credentials/credentials.json
    ```
 
 2. If missing, obtain credentials from Google Cloud Console:
@@ -41,11 +41,11 @@ This guide covers common issues and their solutions when using the Gmail skill.
    - Create/select project
    - Enable Gmail API
    - Create OAuth 2.0 Client ID (Desktop app)
-   - Download and save to `/Users/pk/work/gmail_skill/credentials/credentials.json`
+   - Download and save to `credentials/credentials.json`
 
 3. Run authentication:
    ```bash
-   python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_auth.py
+   python skills/gmail/scripts/gmail_auth.py
    ```
 
 ---
@@ -68,7 +68,7 @@ This guide covers common issues and their solutions when using the Gmail skill.
 Re-authenticate to get a new token:
 
 ```bash
-python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_auth.py
+python skills/gmail/scripts/gmail_auth.py
 ```
 
 This will:
@@ -281,7 +281,7 @@ python gmail_auth.py --scopes "gmail.readonly,gmail.send,gmail.labels"
 
 2. Use absolute paths:
    ```bash
-   --attach "/Users/pk/Documents/report.pdf"
+   --attach "/path/to/report.pdf"
    ```
 
 3. Check file permissions:
@@ -477,7 +477,7 @@ ModuleNotFoundError: No module named 'google'
 
 ```bash
 # Install dependencies
-pip install -e /Users/pk/work/gmail_skill/
+pip install -e .
 
 # Or install individually
 pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib
@@ -503,10 +503,10 @@ python -c "import googleapiclient; print('✅ Google API client installed')"
 
 ```bash
 # Add execute permissions
-chmod +x /Users/pk/work/gmail_skill/skills/gmail/scripts/*.py
+chmod +x skills/gmail/scripts/*.py
 
 # Or run with python explicitly
-python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_read.py
+python skills/gmail/scripts/gmail_read.py
 ```
 
 ---
@@ -521,11 +521,11 @@ python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_read.py
 
 ```bash
 # Fix permissions
-chmod 600 /Users/pk/work/gmail_skill/credentials/credentials.json
-chmod 600 /Users/pk/work/gmail_skill/credentials/token.json
+chmod 600 credentials/credentials.json
+chmod 600 credentials/token.json
 
 # Verify
-ls -la /Users/pk/work/gmail_skill/credentials/
+ls -la credentials/
 ```
 
 ---
@@ -571,7 +571,7 @@ If this works, gradually add complexity to find where it breaks.
 
 ```bash
 # Check files exist
-ls -la /Users/pk/work/gmail_skill/credentials/
+ls -la credentials/
 
 # Should see:
 # -rw-------  credentials.json
@@ -582,7 +582,7 @@ ls -la /Users/pk/work/gmail_skill/credentials/
 ### Test OAuth Flow Manually
 
 ```bash
-python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_auth.py --verbose
+python skills/gmail/scripts/gmail_auth.py --verbose
 ```
 
 This shows each step of authentication and will pinpoint setup issues.

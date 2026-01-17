@@ -49,20 +49,20 @@ The user needs to create OAuth2 credentials:
 4. Configure OAuth consent screen (Desktop app type)
 5. Create "OAuth 2.0 Client ID" credentials
 6. Download credentials JSON file
-7. Save as `/Users/pk/work/gmail_skill/credentials/credentials.json`
+7. Save as `credentials/credentials.json`
 
 ### Step 2: Run Initial Authentication
 
 Execute the authentication script to obtain tokens:
 
 ```bash
-python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_auth.py
+python skills/gmail/scripts/gmail_auth.py
 ```
 
 This will:
 - Open a browser for OAuth consent
 - User grants permissions
-- Save tokens to `/Users/pk/work/gmail_skill/credentials/token.json`
+- Save tokens to `credentials/token.json`
 - Tokens auto-refresh in future operations
 
 **If you encounter authentication errors**, the user needs to re-run `gmail_auth.py`.
@@ -76,7 +76,7 @@ Use `gmail_read.py` to search for and retrieve emails.
 ### Basic Usage
 
 ```bash
-python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_read.py \
+python skills/gmail/scripts/gmail_read.py \
   --query "SEARCH_QUERY" \
   --max-results 10 \
   --format metadata
@@ -147,7 +147,7 @@ For comprehensive query syntax, see [examples/search-examples.md](examples/searc
 When the user asks "check my unread emails":
 
 ```bash
-python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_read.py \
+python skills/gmail/scripts/gmail_read.py \
   --query "is:unread" \
   --max-results 20 \
   --format metadata
@@ -162,7 +162,7 @@ Use `gmail_send.py` to compose and send emails.
 ### Basic Usage
 
 ```bash
-python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_send.py \
+python skills/gmail/scripts/gmail_send.py \
   --to "recipient@example.com" \
   --subject "Email Subject" \
   --body "Email body text"
@@ -194,7 +194,7 @@ python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_send.py \
 
 **Simple email:**
 ```bash
-python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_send.py \
+python skills/gmail/scripts/gmail_send.py \
   --to "colleague@example.com" \
   --subject "Quick Update" \
   --body "The project is on track for delivery next week."
@@ -202,7 +202,7 @@ python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_send.py \
 
 **Multiple recipients with CC:**
 ```bash
-python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_send.py \
+python skills/gmail/scripts/gmail_send.py \
   --to "team@example.com,manager@example.com" \
   --cc "stakeholder@example.com" \
   --subject "Q1 Results" \
@@ -223,7 +223,7 @@ Use `gmail_labels.py` to create labels and organize emails.
 ### List All Labels
 
 ```bash
-python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_labels.py \
+python skills/gmail/scripts/gmail_labels.py \
   --action list
 ```
 
@@ -232,7 +232,7 @@ Returns JSON with all labels (system and user-created).
 ### Create New Label
 
 ```bash
-python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_labels.py \
+python skills/gmail/scripts/gmail_labels.py \
   --action create \
   --name "Work/Projects"
 ```
@@ -242,7 +242,7 @@ python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_labels.py \
 ### Apply Label to Messages
 
 ```bash
-python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_labels.py \
+python skills/gmail/scripts/gmail_labels.py \
   --action apply \
   --label-name "Important" \
   --message-ids "18d1a2b3c4d5e6f7,18d1a2b3c4d5e6f8"
@@ -251,7 +251,7 @@ python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_labels.py \
 ### Remove Label from Messages
 
 ```bash
-python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_labels.py \
+python skills/gmail/scripts/gmail_labels.py \
   --action remove \
   --label-name "Important" \
   --message-ids "18d1a2b3c4d5e6f7"
@@ -321,7 +321,7 @@ If you see errors like:
 
 **Solution:** User needs to re-authenticate:
 ```bash
-python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_auth.py
+python skills/gmail/scripts/gmail_auth.py
 ```
 
 ### Permission Errors
@@ -404,7 +404,7 @@ Use RLM mode when:
 Use `gmail_bulk_read.py` to fetch large numbers of emails:
 
 ```bash
-python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_bulk_read.py \
+python skills/gmail/scripts/gmail_bulk_read.py \
   --query "newer_than:30d" \
   --max-results 500 \
   --format metadata \
@@ -425,7 +425,7 @@ python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_bulk_read.py \
 Use `gmail_rlm_repl.py` for recursive email analysis:
 
 ```bash
-python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_rlm_repl.py \
+python skills/gmail/scripts/gmail_rlm_repl.py \
   --query "is:unread" \
   --max-results 200 \
   --code "
@@ -505,7 +505,7 @@ FINAL('\\n'.join(summaries))
 Summarize 200 emails by sender:
 
 ```bash
-python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_rlm_repl.py \
+python skills/gmail/scripts/gmail_rlm_repl.py \
   --query "newer_than:7d" \
   --max-results 200 \
   --code "
@@ -529,7 +529,7 @@ FINAL('## Weekly Inbox Summary\\n\\n' + '\\n\\n'.join(summaries))
 Extract action items from many emails:
 
 ```bash
-python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_rlm_repl.py \
+python skills/gmail/scripts/gmail_rlm_repl.py \
   --query "newer_than:14d" \
   --max-results 300 \
   --code "
@@ -555,7 +555,7 @@ else:
 Categorize emails:
 
 ```bash
-python /Users/pk/work/gmail_skill/skills/gmail/scripts/gmail_rlm_repl.py \
+python skills/gmail/scripts/gmail_rlm_repl.py \
   --query "is:unread" \
   --max-results 100 \
   --code "
@@ -650,7 +650,7 @@ FINAL('\n---\n'.join(results))
 - Gmail API has rate limits (see api-reference.md)
 
 **Security:**
-- Credentials are stored in `/Users/pk/work/gmail_skill/credentials/`
+- Credentials are stored in `credentials/`
 - Never log or display credential contents
 - Token files are gitignored
 - All OAuth flows use HTTPS
