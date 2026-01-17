@@ -11,3 +11,6 @@ wheels/
 
 # Gmail API credentials - NEVER commit these
 credentials/
+
+# macOS
+.DS_Store

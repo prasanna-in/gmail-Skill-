@@ -19,6 +19,9 @@ uv sync
 
 # Run OAuth2 authentication (one-time setup, opens browser)
 .venv/bin/python skills/gmail/scripts/gmail_auth.py
+
+# Set Anthropic API key for RLM mode (required for llm_query calls)
+export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
 ### Running Scripts
@@ -81,18 +84,21 @@ skills/gmail/
 1. **All scripts return JSON** - Parse `status` field ("success" or "error")
 2. **OAuth tokens auto-refresh** - After initial `gmail_auth.py`, tokens are managed automatically
 3. **Scopes are minimal** - Each script requests only needed permissions (readonly, send, labels)
-4. **RLM uses subprocess** - `llm_query()` calls Claude CLI for recursive analysis
+4. **RLM uses Anthropic SDK** - `llm_query()` calls Claude via Anthropic Python SDK (requires `ANTHROPIC_API_KEY`)
 
 ### RLM Built-in Functions
 
 When writing `--code` for `gmail_rlm_repl.py`:
 
-- `llm_query(prompt, context)` - Recursive LLM call
-- `parallel_llm_query(prompts, max_workers=5)` - Concurrent LLM calls
-- `parallel_map(prompt, chunks, context_fn, max_workers=5)` - Apply prompt to chunks
+- `llm_query(prompt, context, model=None, json_output=False)` - Recursive LLM call via Anthropic SDK
+- `parallel_llm_query(prompts, max_workers=5, model=None, json_output=False)` - Concurrent LLM calls
+- `parallel_map(prompt, chunks, context_fn, max_workers=5, model=None, json_output=False)` - Apply prompt to chunks
+- `get_session()` - Get session stats (token usage, call count)
 - `chunk_by_size/sender/date/thread(emails)` - Grouping functions
 - `filter_by_keyword/sender(emails, pattern)` - Filtering functions
 - `FINAL(result)` / `FINAL_VAR(var)` - Output final result
+
+**CLI options:** `--model` selects LLM model (default: claude-sonnet-4-20250514), `--json-output` includes session stats in output.
 
 ## Credentials
 

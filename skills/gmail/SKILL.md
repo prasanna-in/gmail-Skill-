@@ -379,6 +379,16 @@ RLM (Recursive Language Model) mode enables large-scale email analysis by:
 3. Using recursive LLM calls to process chunks
 4. Aggregating results into a final answer
 
+### RLM Prerequisites
+
+RLM mode requires the `ANTHROPIC_API_KEY` environment variable to be set:
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+The API key is used for LLM sub-queries via the Anthropic Python SDK.
+
 ### When to Use RLM Mode
 
 Use RLM mode when:
@@ -442,6 +452,8 @@ FINAL('\\n'.join(summaries))
 - `--format`: Email format (minimal, metadata, full)
 - `--code`: Python code to execute in RLM environment
 - `--code-file`: Load code from file instead
+- `--model`: Model for LLM sub-queries (default: claude-sonnet-4-20250514)
+- `--json-output`: Return result as JSON with session stats (token usage)
 
 ### Built-in Variables
 
@@ -455,11 +467,12 @@ FINAL('\\n'.join(summaries))
 **Core Functions:**
 | Function | Description |
 |----------|-------------|
-| `llm_query(prompt, context)` | Recursive LLM call via Claude CLI |
-| `parallel_llm_query(prompts, max_workers)` | Execute multiple LLM queries in parallel |
-| `parallel_map(prompt, chunks, context_fn, max_workers)` | Apply prompt to chunks in parallel |
+| `llm_query(prompt, context, model=None, json_output=False)` | Recursive LLM call via Anthropic SDK |
+| `parallel_llm_query(prompts, max_workers, model=None, json_output=False)` | Execute multiple LLM queries in parallel |
+| `parallel_map(prompt, chunks, context_fn, max_workers, model=None, json_output=False)` | Apply prompt to chunks in parallel |
 | `FINAL(result)` | Output final result (string) |
 | `FINAL_VAR(var_name)` | Output variable as JSON |
+| `get_session()` | Get session stats (token usage, call count) |
 
 **Chunking Functions:**
 | Function | Description |
@@ -644,10 +657,16 @@ FINAL('\n---\n'.join(results))
 
 ## Skill Version
 
-Version: 0.2.0
+Version: 0.3.0
 Last Updated: 2026-01-17
 
 **Changelog:**
+- 0.3.0: RLM enhancement - Anthropic SDK migration and session tracking
+  - Migrated `llm_query()` from Claude CLI subprocess to Anthropic Python SDK
+  - Added session tracking with token usage stats (`get_session()`)
+  - Added `--model` flag for model selection (default: claude-sonnet-4-20250514)
+  - Added `--json-output` flag includes session stats with token counts
+  - Requires `ANTHROPIC_API_KEY` environment variable
 - 0.2.0: Added RLM (Recursive Language Model) mode for large-scale email analysis
   - `gmail_bulk_read.py` - Pagination for 1000+ emails
   - `gmail_rlm_repl.py` - Python REPL with recursive LLM calls

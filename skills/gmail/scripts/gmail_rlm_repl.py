@@ -51,12 +51,16 @@ Example:
 
 import argparse
 import json
-import subprocess
+import os
 import sys
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional
 
+from anthropic import Anthropic
 from googleapiclient.errors import HttpError
 
 # Import common utilities
@@ -110,15 +114,71 @@ _final_set = False
 # Global default for RLM framing (can be disabled via CLI)
 _default_use_rlm_framing = True
 
+# Global default model for sub-queries
+_default_model = "claude-sonnet-4-20250514"
+
+
+@dataclass
+class RLMSession:
+    """Tracks token usage and metadata for an RLM session."""
+    session_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    call_count: int = 0
+    model: str = "claude-sonnet-4-20250514"
+
+    def add_usage(self, input_tokens: int, output_tokens: int) -> None:
+        """Accumulate token counts from an API call."""
+        self.total_input_tokens += input_tokens
+        self.total_output_tokens += output_tokens
+        self.call_count += 1
+        self.updated_at = datetime.now().isoformat()
+
+    def to_dict(self) -> dict:
+        """Return session stats as a dictionary."""
+        return {
+            "session_id": self.session_id,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "total_input_tokens": self.total_input_tokens,
+            "total_output_tokens": self.total_output_tokens,
+            "total_tokens": self.total_input_tokens + self.total_output_tokens,
+            "call_count": self.call_count,
+            "model": self.model
+        }
+
+
+# Global session instance
+_session: Optional[RLMSession] = None
+
+
+def get_session() -> RLMSession:
+    """Get or create the global RLM session."""
+    global _session
+    if _session is None:
+        _session = RLMSession(model=_default_model)
+    return _session
+
+
+def reset_session(model: str = None) -> RLMSession:
+    """Reset the session with optional model override."""
+    global _session
+    _session = RLMSession(model=model or _default_model)
+    return _session
+
 
 def llm_query(
     prompt: str,
     context: str = None,
     timeout: int = 120,
-    use_rlm_framing: bool = None
+    use_rlm_framing: bool = None,
+    model: str = None,
+    json_output: bool = False
 ) -> str:
     """
-    Invoke Claude recursively via CLI subprocess.
+    Invoke Claude recursively via Anthropic SDK.
 
     This is the key RLM function - enables recursive LLM calls where each
     sub-query has fresh context, avoiding context rot from long conversations.
@@ -129,6 +189,8 @@ def llm_query(
         timeout: Timeout in seconds (default: 120)
         use_rlm_framing: Include RLM preamble for concise, aggregation-ready output
                          (default: None, uses global _default_use_rlm_framing)
+        model: Model to use (default: uses global _default_model)
+        json_output: Request JSON response format (default: False)
 
     Returns:
         LLM response string
@@ -139,9 +201,11 @@ def llm_query(
             context=str([e['snippet'] for e in emails[:10]])
         )
     """
-    # Use global default if not explicitly set
+    # Use global defaults if not explicitly set
     if use_rlm_framing is None:
         use_rlm_framing = _default_use_rlm_framing
+    if model is None:
+        model = _default_model
 
     # Build the full prompt with optional RLM framing
     parts = []
@@ -157,33 +221,54 @@ def llm_query(
     full_prompt = "\n".join(parts)
 
     try:
-        # Call Claude CLI in print mode (no interactive features)
-        result = subprocess.run(
-            ["claude", "--print", "-p", full_prompt],
-            capture_output=True,
-            text=True,
-            timeout=timeout
+        # Get session for token tracking
+        session = get_session()
+
+        # Initialize Anthropic client (uses ANTHROPIC_API_KEY env var)
+        client = Anthropic()
+
+        # Build request parameters
+        request_params = {
+            "model": model,
+            "max_tokens": 4096,
+            "messages": [{"role": "user", "content": full_prompt}],
+        }
+
+        # Add JSON output mode if requested
+        if json_output:
+            request_params["response_format"] = {"type": "json_object"}
+
+        # Make API call with timeout
+        response = client.messages.create(
+            **request_params,
+            timeout=float(timeout)
         )
 
-        if result.returncode != 0:
-            error_msg = result.stderr.strip() if result.stderr else "Unknown error"
-            return f"[LLM Error: {error_msg}]"
+        # Track token usage
+        session.add_usage(
+            response.usage.input_tokens,
+            response.usage.output_tokens
+        )
 
-        return result.stdout.strip()
+        return response.content[0].text
 
-    except subprocess.TimeoutExpired:
-        return "[LLM Error: Query timed out]"
-    except FileNotFoundError:
-        return "[LLM Error: Claude CLI not found. Ensure 'claude' is in PATH]"
     except Exception as e:
-        return f"[LLM Error: {str(e)}]"
+        error_str = str(e)
+        if "ANTHROPIC_API_KEY" in error_str or "api_key" in error_str.lower():
+            return "[LLM Error: ANTHROPIC_API_KEY not set. Export it in your environment.]"
+        elif "timeout" in error_str.lower():
+            return "[LLM Error: Query timed out]"
+        else:
+            return f"[LLM Error: {error_str}]"
 
 
 def parallel_llm_query(
     prompts: list[tuple[str, str]],
     max_workers: int = 5,
     timeout: int = 120,
-    use_rlm_framing: bool = None
+    use_rlm_framing: bool = None,
+    model: str = None,
+    json_output: bool = False
 ) -> list[str]:
     """
     Execute multiple LLM queries in parallel.
@@ -194,6 +279,8 @@ def parallel_llm_query(
         timeout: Per-query timeout in seconds
         use_rlm_framing: Include RLM preamble for concise, aggregation-ready output
                          (default: None, uses global _default_use_rlm_framing)
+        model: Model to use (default: uses global _default_model)
+        json_output: Request JSON response format (default: False)
 
     Returns:
         List of results in same order as prompts
@@ -201,7 +288,7 @@ def parallel_llm_query(
     results = [None] * len(prompts)
 
     def execute_query(index, prompt, context):
-        return index, llm_query(prompt, context, timeout, use_rlm_framing)
+        return index, llm_query(prompt, context, timeout, use_rlm_framing, model, json_output)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
@@ -221,7 +308,9 @@ def parallel_map(
     chunks: list,
     context_fn: Callable = str,
     max_workers: int = 5,
-    use_rlm_framing: bool = None
+    use_rlm_framing: bool = None,
+    model: str = None,
+    json_output: bool = False
 ) -> list[str]:
     """
     Apply the same LLM prompt to multiple chunks in parallel.
@@ -233,6 +322,8 @@ def parallel_map(
         max_workers: Max concurrent workers
         use_rlm_framing: Include RLM preamble for concise, aggregation-ready output
                          (default: None, uses global _default_use_rlm_framing)
+        model: Model to use (default: uses global _default_model)
+        json_output: Request JSON response format (default: False)
 
     Returns:
         List of results
@@ -246,7 +337,7 @@ def parallel_map(
         )
     """
     prompts = [(func_prompt, context_fn(chunk)) for chunk in chunks]
-    return parallel_llm_query(prompts, max_workers=max_workers, use_rlm_framing=use_rlm_framing)
+    return parallel_llm_query(prompts, max_workers=max_workers, use_rlm_framing=use_rlm_framing, model=model, json_output=json_output)
 
 
 def FINAL(result: str):
@@ -461,6 +552,7 @@ def execute_rlm_code(
         'FINAL': FINAL,
         'FINAL_VAR': FINAL_VAR,
         'RLM_PREAMBLE': RLM_PREAMBLE,
+        'get_session': get_session,
 
         # Helper functions
         'chunk_by_size': chunk_by_size,
@@ -631,12 +723,23 @@ Example:
         help="Disable RLM preamble in sub-queries (for debugging)"
     )
 
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="claude-sonnet-4-20250514",
+        help="Model for LLM sub-queries (default: claude-sonnet-4-20250514)"
+    )
+
     args = parser.parse_args()
 
-    # Set global RLM framing default based on CLI flag
-    global _default_use_rlm_framing
+    # Set global defaults based on CLI flags
+    global _default_use_rlm_framing, _default_model
     if args.no_rlm_framing:
         _default_use_rlm_framing = False
+    _default_model = args.model
+
+    # Initialize session with the specified model
+    reset_session(model=args.model)
 
     # Load code
     if args.code_file:
@@ -669,7 +772,8 @@ Example:
             print(format_success({
                 "rlm_result": result,
                 "emails_processed": len(emails),
-                "query": metadata.get('query', '')
+                "query": metadata.get('query', ''),
+                "session": get_session().to_dict()
             }))
         else:
             print(result)
