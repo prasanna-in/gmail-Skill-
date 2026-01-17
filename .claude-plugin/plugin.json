@@ -1,9 +1,0 @@
-{
-  "name": "gmail-skill",
-  "description": "Gmail integration skill - read, search, send emails, manage labels via Gmail API",
-  "version": "0.1.0",
-  "author": {
-    "name": "PK"
-  },
-  "license": "MIT"
-}
