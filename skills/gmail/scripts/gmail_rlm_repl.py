@@ -148,6 +148,8 @@ MODEL_PRICING = {
     "claude-3-5-haiku-20241022": {"input": 1.00, "output": 5.00},
     "claude-3-5-sonnet-20241022": {"input": 3.00, "output": 15.00},
     "claude-3-opus-20240229": {"input": 15.00, "output": 75.00},
+    "claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00},
+    "claude-haiku-4-20250514": {"input": 1.00, "output": 5.00},
 }
 
 DEFAULT_MAX_BUDGET_USD = 5.00
@@ -174,7 +176,7 @@ _final_set = False
 _default_use_rlm_framing = True
 
 # Global default model for sub-queries
-_default_model = "claude-3-5-haiku-20241022"
+_default_model = "claude-sonnet-4-20250514"
 
 
 @dataclass
@@ -186,7 +188,7 @@ class RLMSession:
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     call_count: int = 0
-    model: str = "claude-3-5-haiku-20241022"
+    model: str = "claude-sonnet-4-20250514"
     # Budget and limits
     max_budget_usd: float = DEFAULT_MAX_BUDGET_USD
     max_calls: int = DEFAULT_MAX_CALLS
@@ -374,16 +376,16 @@ def llm_query(
             # Initialize Anthropic client (uses ANTHROPIC_API_KEY env var)
             client = Anthropic()
 
+            # Add JSON formatting instruction to prompt if requested
+            if json_output:
+                full_prompt = full_prompt + "\n\nIMPORTANT: Respond with valid JSON only. No markdown, no explanation, just the JSON."
+
             # Build request parameters
             request_params = {
                 "model": model,
                 "max_tokens": 4096,
                 "messages": [{"role": "user", "content": full_prompt}],
             }
-
-            # Add JSON output mode if requested
-            if json_output:
-                request_params["response_format"] = {"type": "json_object"}
 
             # Make API call with timeout
             if not _skip_status:
@@ -413,13 +415,18 @@ def llm_query(
     except (BudgetExceededError, RecursionDepthExceededError):
         raise  # Re-raise control flow exceptions
     except Exception as e:
+        import traceback
         error_str = str(e)
-        if "ANTHROPIC_API_KEY" in error_str or "api_key" in error_str.lower():
-            return "[LLM Error: ANTHROPIC_API_KEY not set. Export it in your environment.]"
+        error_type = type(e).__name__
+
+        # Check for missing API key (AuthenticationError)
+        if "authentication" in error_str.lower() or "api_key" in error_str.lower():
+            return "[LLM Error: ANTHROPIC_API_KEY not set or invalid. Export it in your environment.]"
         elif "timeout" in error_str.lower():
             return "[LLM Error: Query timed out]"
         else:
-            return f"[LLM Error: {error_str}]"
+            # Include error type for better debugging
+            return f"[LLM Error: {error_type}: {error_str}]"
 
 
 def parallel_llm_query(
@@ -1023,6 +1030,17 @@ def execute_rlm_code(
         return f"[Execution Error: {type(e).__name__}: {str(e)}]"
 
 
+def check_anthropic_api_key() -> bool:
+    """Check if ANTHROPIC_API_KEY is set and valid."""
+    import os
+    api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+    if not api_key:
+        return False
+    if not api_key.startswith('sk-ant-'):
+        return False
+    return True
+
+
 def main():
     """Main entry point for RLM REPL."""
     parser = argparse.ArgumentParser(
@@ -1146,8 +1164,8 @@ Example:
     parser.add_argument(
         "--model",
         type=str,
-        default="claude-3-5-haiku-20241022",
-        help="Model for LLM sub-queries (default: claude-3-5-haiku-20241022)"
+        default="claude-sonnet-4-20250514",
+        help="Model for LLM sub-queries (default: claude-sonnet-4-20250514)"
     )
 
     # Budget and safety controls
@@ -1209,6 +1227,17 @@ Example:
     )
 
     args = parser.parse_args()
+
+    # Check for Anthropic API key
+    if not check_anthropic_api_key():
+        print(json.dumps({
+            "status": "error",
+            "error_type": "ConfigurationError",
+            "message": "ANTHROPIC_API_KEY not set. RLM requires an Anthropic API key for LLM sub-queries.\n"
+                       "Set it with: export ANTHROPIC_API_KEY='sk-ant-api03-...'\n"
+                       "Get a key at: https://console.anthropic.com/"
+        }), file=sys.stderr)
+        sys.exit(1)
 
     # Set global defaults based on CLI flags
     global _default_use_rlm_framing, _default_model

@@ -98,7 +98,27 @@ When writing `--code` for `gmail_rlm_repl.py`:
 - `filter_by_keyword/sender(emails, pattern)` - Filtering functions
 - `FINAL(result)` / `FINAL_VAR(var)` - Output final result
 
-**CLI options:** `--model` selects LLM model (default: claude-3-5-haiku-20241022), `--json-output` includes session stats in output.
+**CLI options:** `--model` selects LLM model (default: claude-sonnet-4-20250514), `--json-output` includes session stats in output.
+
+### RLM Safety Controls
+
+- `--max-budget USD` - Stop if cost exceeds budget (default: $5.00)
+- `--max-calls N` - Stop after N LLM calls (default: 100)
+- `--max-depth N` - Max recursion depth (default: 3)
+- `--no-cache` - Disable query caching
+
+### Pre-built Workflows
+
+```python
+# Classify emails into categories
+result = inbox_triage(emails)  # Returns {urgent:[], action_required:[], fyi:[], newsletter:[]}
+
+# Generate executive summary
+summary = weekly_summary(emails)
+
+# Extract action items with deadlines
+items = find_action_items(emails)  # Returns [{task, deadline, sender, priority}]
+```
 
 ## Credentials
 
@@ -107,3 +127,53 @@ Stored in `credentials/` (gitignored):
 - `token.json` - Auto-generated auth tokens
 
 If you see authentication errors, re-run `gmail_auth.py`.
+
+## Learnings & Common Pitfalls
+
+### 1. Anthropic API vs OpenAI API Differences
+
+**Bug:** Using `response_format={"type": "json_object"}` parameter with Anthropic SDK causes `TypeError: Messages.create() got an unexpected keyword argument 'response_format'`.
+
+**Root Cause:** The `response_format` parameter is OpenAI-specific. Anthropic's Claude API does not support this parameter.
+
+**Solution:** Instead of using API-level JSON mode, append JSON formatting instructions to the prompt:
+```python
+# DON'T do this with Anthropic:
+response = client.messages.create(
+    model=model,
+    messages=[...],
+    response_format={"type": "json_object"}  # ❌ OpenAI-only
+)
+
+# DO this instead:
+prompt = original_prompt + "\n\nIMPORTANT: Respond with valid JSON only. No markdown, no explanation, just the JSON."
+response = client.messages.create(
+    model=model,
+    messages=[{"role": "user", "content": prompt}]  # ✅ Works with Anthropic
+)
+```
+
+### 2. Environment Variables in Subprocesses
+
+**Bug:** `ANTHROPIC_API_KEY` not available when running scripts, even though it's set in shell profile.
+
+**Root Cause:** Environment variables in `~/.zshrc` or `~/.bashrc` are only loaded for interactive shells. When Claude Code runs bash commands, they may not inherit these variables.
+
+**Solution:** Either:
+1. Source the profile before running: `source ~/.zshrc && python script.py`
+2. Export in the current session: `export ANTHROPIC_API_KEY="..."`
+3. Add startup check in script to provide clear error message
+
+### 3. Recursion Depth with Parallel Workers
+
+**Bug:** `RecursionDepthExceededError` when using `parallel_map` with low `--max-depth`.
+
+**Root Cause:** With `ThreadPoolExecutor`, multiple worker threads increment the shared `current_depth` counter concurrently, causing it to exceed limits unexpectedly.
+
+**Solution:** Set higher `--max-depth` (e.g., 50) when using parallel processing, or use sequential processing for depth-sensitive operations.
+
+### 4. Model Deprecation
+
+**Issue:** Model `claude-3-5-haiku-20241022` shows deprecation warnings.
+
+**Solution:** Update to current models like `claude-sonnet-4-20250514` or `claude-haiku-4-20250514`. Keep `MODEL_PRICING` dict updated with new model costs.
