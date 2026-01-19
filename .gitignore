@@ -14,3 +14,6 @@ credentials/
 
 # macOS
 .DS_Store
+
+# Strategic planning documents
+plan/
