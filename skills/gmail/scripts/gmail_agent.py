@@ -2,6 +2,23 @@
 """
 Gmail Agent - Autonomous Email Analysis
 
+⚠️  DEPRECATED: This script is deprecated and will be removed in v0.5.0.
+
+Claude Code's general-purpose Agent now orchestrates RLM operations directly via
+comprehensive documentation instead of calling this standalone subprocess.
+
+For new integrations, use Claude Code's Agent which reads:
+- skills/gmail/SKILL.md (when to activate)
+- skills/gmail/RLM_AGENT_GUIDE.md (how to orchestrate)
+- skills/gmail/references/rlm-function-reference.md (available functions)
+- skills/gmail/examples/agent-conversations.md (example dialogues)
+
+This script remains functional for backward compatibility but shows deprecation warnings.
+
+---
+
+OLD DOCUMENTATION (Deprecated):
+
 Provides natural language interface to Gmail operations using RLM.
 Supports both agent mode (default) and script mode (for power users).
 
@@ -50,6 +67,20 @@ from agent.agent_core import AgentCore
 
 
 def main():
+    # Print deprecation warning
+    print("=" * 80)
+    print("⚠️  DEPRECATION WARNING")
+    print("=" * 80)
+    print("This gmail_agent.py script is deprecated and will be removed in v0.5.0.")
+    print()
+    print("Claude Code's Agent now orchestrates RLM operations directly via documentation.")
+    print("For new usage, interact with Claude Code normally - it will automatically")
+    print("orchestrate RLM analysis based on comprehensive documentation.")
+    print()
+    print("See: skills/gmail/RLM_AGENT_GUIDE.md for details.")
+    print("=" * 80)
+    print()
+
     parser = argparse.ArgumentParser(
         description='Gmail Agent - Autonomous Email Analysis',
         formatter_class=argparse.RawDescriptionHelpFormatter,

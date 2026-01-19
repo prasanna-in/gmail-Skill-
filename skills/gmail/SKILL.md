@@ -1,7 +1,7 @@
 ---
 name: gmail
-description: Use when the user asks to "read my email", "search my gmail", "send an email", "check my inbox", "manage gmail labels", "organize my email", "triage my inbox", "summarize emails", "find action items", "analyze security alerts", or mentions Gmail operations like reading messages, composing emails, searching for emails, managing folders/labels, or analyzing email content. Provides direct Gmail API integration with autonomous agent mode for complex analysis, plus simple scripts for basic operations.
-version: 0.3.0
+description: Use when the user asks to "read my email", "search my gmail", "send an email", "check my inbox", "manage gmail labels", "organize my email", "triage my inbox", "summarize emails", "find action items", "analyze security alerts", or mentions Gmail operations like reading messages, composing emails, searching for emails, managing folders/labels, or analyzing email content. Provides direct Gmail API integration with Claude Code Agent orchestration of RLM (Recursive Language Model) analysis for complex tasks, plus simple scripts for basic operations.
+version: 0.4.0
 ---
 
 # Gmail Integration Skill
@@ -12,238 +12,216 @@ This skill provides direct Gmail API integration for reading, searching, sending
 
 This skill supports three modes of operation:
 
-### Agent Mode (RECOMMENDED - NEW)
-**Natural language interface with autonomous goal interpretation.**
-- For: Everyone, especially non-technical users and SOC analysts
-- Features: Multi-turn dialogue, session persistence, automatic optimization
-- Budget: Default $1.00 limit (configurable)
-- Best for: Most tasks - security triage, inbox management, email analysis
+### RLM Analysis (RECOMMENDED - via Claude Code Agent)
+**Claude Code's Agent orchestrates Recursive Language Model analysis for complex email tasks.**
+- For: Everyone - Agent handles complexity automatically
+- Features: Natural language interpretation, multi-turn dialogue, automatic cost optimization
+- Budget: Default $1.00 limit (Agent asks confirmation for higher costs)
+- Best for: Inbox triage, security analysis, action items, summaries, >20 emails
 
-```bash
-# Natural language goals
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Triage security alerts from last week"
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Find action items with deadlines"
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Summarize my week"
+**How it works:**
+1. User: "Triage my inbox"
+2. Agent interprets goal → selects `inbox_triage()` function
+3. Agent constructs RLM code → executes via `gmail_rlm_repl.py`
+4. Agent presents results naturally → caches for follow-up questions
 
-# Interactive dialogue
-> Triage my inbox
-Agent: [Results...]
-> Show me urgent emails
-Agent: [Urgent emails...]
-```
-
-See `AGENT.md` for comprehensive documentation.
+See `RLM_AGENT_GUIDE.md` for complete orchestration guidance.
 
 ### Normal Mode
-For typical email tasks - reading specific emails, sending messages, managing labels.
+For simple, direct email operations.
 - Max 100 emails per query
-- Direct, simple operations
-- Best for: specific lookups, sending, labeling
+- Direct API calls without LLM analysis
+- Best for: Sending emails, reading 1-5 specific messages, applying labels
 
-### RLM Mode (Script Mode)
-For large-scale email analysis with custom Python code.
+**Scripts:** `gmail_read.py`, `gmail_send.py`, `gmail_labels.py`
+
+### RLM Mode (Direct/Script Mode)
+For power users who want full control.
+- Write custom Python code with RLM functions
+- Direct subprocess execution of `gmail_rlm_repl.py`
 - Pagination for 1000+ emails
-- Recursive LLM sub-queries to avoid context overflow
-- Best for: Custom workflows, power users, automation pipelines
+- Best for: Custom logic, automation pipelines
+
+**Script:** `gmail_rlm_repl.py --code "your_code_here"`
 
 **Mode Selection Guidelines:**
 
 | Scenario | Recommended Mode | Reason |
 |----------|-----------------|--------|
-| Triage security alerts | **Agent** | Natural language, pre-built workflow |
+| Triage security alerts | **RLM (via Agent)** | Complex analysis, pre-built workflow |
 | Check 10 unread emails | Normal | Small dataset, simple task |
 | Send an email | Normal | Single operation |
-| Summarize inbox | **Agent** | Natural language, automatic optimization |
-| Find action items across 500 emails | **Agent** | Pre-built workflow with optimization |
+| Summarize inbox | **RLM (via Agent)** | Content analysis required |
+| Find action items across 500 emails | **RLM (via Agent)** | Large-scale LLM processing |
 | Apply label to 5 messages | Normal | Simple batch operation |
-| Custom email analysis logic | RLM/Script | Need full Python control |
+| Custom email analysis logic | RLM (Direct) | Need full Python control |
 
-## 🤖 When Claude Code Should Use Agent Mode
+## 🤖 Claude Code Agent Orchestration Guide
 
-**IMPORTANT:** Claude Code should default to Agent Mode for most user requests. Only use Normal Mode for very simple operations.
+**IMPORTANT:** For complex email analysis tasks, Claude Code's Agent should directly orchestrate RLM (Recursive Language Model) operations instead of using subprocess agents. This provides better control, natural dialogue, and cost optimization.
 
-### Use Agent Mode When User Asks:
+### When to Activate RLM Orchestration
+
+Activate when user requests:
 - ✅ "Triage my inbox" / "Organize my emails"
 - ✅ "Summarize my emails" / "What's in my inbox?"
 - ✅ "Find action items" / "What do I need to do?"
 - ✅ "Analyze security alerts" / "Check for threats"
-- ✅ "Find emails from..." / "Search for..."
+- ✅ "Find emails from..." / "Search for..." (with analysis intent)
 - ✅ "What are the urgent emails?"
-- ✅ Any request involving >20 emails or analysis/summarization
-- ✅ Any request that requires understanding email content
+- ✅ Any request involving >20 emails or requiring content analysis
+- ✅ Security-specific: "Triage alerts", "Find attack chains", "Detect phishing"
 
-**How to invoke:**
-```bash
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "USER'S GOAL IN NATURAL LANGUAGE"
-```
-
-**Examples:**
-```bash
-# User: "Triage my inbox"
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Triage my inbox"
-
-# User: "Find urgent emails from last week"
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Find urgent emails from last week"
-
-# User: "Summarize security alerts"
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Summarize security alerts" --query "label:security-alerts"
-
-# User: "What action items do I have?"
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Find action items with deadlines"
-```
-
-### Use Normal Mode Only When:
+### Use Normal Mode Only For:
 - ❌ Sending a single specific email (`gmail_send.py`)
 - ❌ Reading exactly 1-5 specific emails by ID
 - ❌ Adding/removing a specific label from specific emails
 - ❌ Very simple operations that don't require analysis
 
-### Claude Code Implementation Pattern
+### How RLM Orchestration Works
 
-When user makes a Gmail request:
+1. **Interpret user goal** → Determine intent, scope, workflow
+2. **Select RLM functions** → Choose pre-built workflows or compose custom logic
+3. **Construct Python code** → Build code to pass to `gmail_rlm_repl.py`
+4. **Estimate cost** → Calculate approximate cost, warn if >$1, confirm if >$2
+5. **Execute subprocess** → Run `gmail_rlm_repl.py --code "..."`
+6. **Present results** → Format naturally in markdown
+7. **Multi-turn dialogue** → Cache results for follow-up questions
 
-1. **Parse the user's intent** - What are they trying to accomplish?
-2. **Choose mode:**
-   - If it involves analysis, summarization, search, triage, or >5 emails → **Agent Mode**
-   - If it's a single simple operation → Normal Mode
-3. **For Agent Mode:**
-   - Extract the user's natural language goal
-   - Call `gmail_agent.py` with that goal
-   - The agent handles everything else automatically
-4. **Present results** to the user
+### Workflow Decision Matrix
 
-**Example Claude Code flow:**
+| User Goal | RLM Function | Estimated Cost (100 emails) |
+|-----------|-------------|----------------------------|
+| Triage inbox | `inbox_triage(emails)` | $0.20 |
+| Weekly summary | `weekly_summary(emails)` | $0.10 |
+| Action items | `find_action_items(emails)` | $0.15 |
+| Security triage | `security_triage(emails)` | $0.40 |
+| Attack chains | `detect_attack_chains(emails)` | $0.50 |
+| Phishing detection | `phishing_analysis(emails)` | $0.30 |
+| Sender analysis | `sender_analysis(emails, top_n=5)` | $0.15 |
+| Custom analysis | Compose with chunking + LLM queries | Varies |
+
+### Example Orchestration
+
+**User Request:** "Triage my inbox"
+
+**Agent Actions:**
+1. **Interpret:** User wants emails categorized by urgency
+2. **Select:** `inbox_triage(emails)` workflow
+3. **Construct Code:**
+```python
+result = inbox_triage(emails)
+print(f'Urgent: {len(result["urgent"])}')
+print(f'Action Required: {len(result["action_required"])}')
+FINAL(f'Found {len(result["urgent"])} urgent emails')
 ```
-User: "What urgent emails do I have this week?"
-
-Claude thinks: This requires analyzing email content + filtering → Agent Mode
-
-Claude executes:
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Find urgent emails from this week" \
-  --query "newer_than:7d" \
-  --max-results 100
-
-Claude presents: [Agent's formatted output to user]
+4. **Estimate:** ~100 emails × $0.002 = $0.20
+5. **Execute:**
+```bash
+.venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
+  --query "is:inbox newer_than:7d" \
+  --max-results 100 \
+  --max-budget 1.00 \
+  --code "result = inbox_triage(emails); FINAL(str(len(result['urgent'])) + ' urgent emails')"
 ```
+6. **Present:** "Inbox Triage Complete: 5 urgent emails, 12 action required, 48 FYI, 23 newsletters"
+7. **Prepare follow-up:** Cache result for "Show me urgent emails"
 
-## Agent Mode Quick Start
+### Complete Documentation
 
-Agent Mode is the **recommended interface** for most Gmail operations. It provides a natural language interface that automatically converts your goals into sophisticated email analyses.
+For comprehensive orchestration guidance, see:
+- **RLM_AGENT_GUIDE.md** - Complete orchestration patterns, cost optimization, multi-turn dialogue
+- **references/rlm-function-reference.md** - All available RLM functions with signatures and examples
+- **examples/agent-conversations.md** - 10+ complete conversation examples showing expected behavior
 
-### Basic Usage
+### Key Principles
+
+1. **Direct Orchestration:** Agent constructs RLM code and calls subprocess directly
+2. **Cost Transparency:** Always estimate costs, warn before expensive operations
+3. **Result Caching:** Keep RLM results in memory for follow-up questions (avoid re-execution)
+4. **Natural Presentation:** Format results in readable markdown, not raw JSON
+5. **Budget Control:** Default $1.00, ask confirmation for operations >$2.00
+
+## RLM Mode Quick Reference
+
+**NOTE:** Claude Code's Agent should orchestrate RLM directly (see section above). This reference is for understanding the underlying RLM subprocess interface.
+
+### Direct RLM Execution (for power users)
 
 ```bash
-# Run a goal in agent mode
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "your goal here"
-
-# Examples
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Triage my inbox"
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Find action items"
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Summarize my week"
+# Execute RLM code directly
+.venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
+  --query "GMAIL_QUERY" \
+  --max-results MAX_EMAILS \
+  --max-budget BUDGET \
+  --code "RLM_CODE"
 ```
 
-### Security Workflows
+### Pre-built Workflow Examples
 
 ```bash
-# Security alert triage (P1-P5 classification, IOCs, kill chains)
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Triage security alerts from last week" \
+# Inbox triage
+.venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
+  --query "is:inbox newer_than:7d" \
+  --max-results 100 \
+  --code "result = inbox_triage(emails); FINAL_VAR('result')"
+
+# Security alert triage
+.venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
   --query "label:security-alerts newer_than:7d" \
-  --max-budget 2.00
+  --max-results 500 \
+  --max-budget 2.00 \
+  --code "result = security_triage(emails); FINAL(result['executive_summary'])"
 
-# Attack chain detection
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Find attack chains in alerts" \
-  --query "label:security-alerts newer_than:24h"
-
-# Phishing analysis
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Analyze phishing attempts" \
-  --query "newer_than:7d"
-```
-
-### General Email Workflows
-
-```bash
-# Inbox management
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Triage my inbox" \
-  --query "is:inbox newer_than:7d"
-
-# Sender analysis
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Summarize emails from top 5 senders" \
-  --max-results 200
-
-# Action items
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Find action items with deadlines" \
-  --query "newer_than:7d"
+# Find action items
+.venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
+  --query "newer_than:14d" \
+  --max-results 300 \
+  --code "items = find_action_items(emails); FINAL_VAR('items')"
 
 # Weekly summary
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Summarize my week" \
+.venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
   --query "newer_than:7d" \
-  --max-results 500
+  --max-results 500 \
+  --code "summary = weekly_summary(emails); FINAL(summary)"
 ```
 
-### Multi-Turn Dialogue
-
-Agent mode supports interactive conversations:
+### Custom Analysis Examples
 
 ```bash
-$ .venv/bin/python skills/gmail/scripts/gmail_agent.py "Triage security alerts"
-Agent: Found 47 alerts. 5 P1, 12 P2, 30 P3+...
-Session saved: ~/.gmail_agent_sessions/session_20250119_143022.json
+# Top senders summary (parallel processing)
+.venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
+  --query "newer_than:7d" \
+  --max-results 200 \
+  --code "
+by_sender = chunk_by_sender(emails)
+top_5 = list(by_sender.items())[:5]
 
-> Show me P1 details
-Agent: [P1 alert details...]
+summaries = parallel_map(
+    'Summarize emails from this sender',
+    [msgs for _, msgs in top_5],
+    lambda msgs: str([m['snippet'] for m in msgs[:10]]),
+    max_workers=5
+)
 
-> What IOCs were found?
-Agent: [IOC list...]
-
-> done
-Session ended. Use --resume to continue later.
-```
-
-### Session Management
-
-```bash
-# Resume a previous session
-.venv/bin/python skills/gmail/scripts/gmail_agent.py --resume session_20250119_143022
-
-# List all sessions
-.venv/bin/python skills/gmail/scripts/gmail_agent.py --list-sessions
-
-# Sessions are stored in ~/.gmail_agent_sessions/
-```
-
-### Advanced Options
-
-```bash
-# Custom budget (default: $1.00)
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Analyze 1000 emails" --max-budget 5.00
-
-# Different output formats
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Triage alerts" --format json
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Triage alerts" --format html > report.html
-
-# Debug mode (shows generated code)
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Triage alerts" --debug
-
-# Non-interactive mode (for scripts)
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Summary" --non-interactive
-
-# Custom model
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Quick task" --model claude-haiku-4-20250514
-```
-
-### Script Mode (Power Users)
-
-For advanced users who want full control with Python code:
-
-```bash
-.venv/bin/python skills/gmail/scripts/gmail_agent.py --script "
-result = security_triage(emails)
-print(f'P1: {len(result[\"classifications\"][\"P1\"])}')
-FINAL(result['executive_summary'])
+output = '\n\n'.join([f'**{s[0]}** ({len(s[1])} emails): {summaries[i]}' for i, s in enumerate(top_5)])
+FINAL(output)
 "
 ```
 
-**Note:** For comprehensive Agent Mode documentation, see `AGENT.md`.
+### Available RLM Functions
+
+**Core:** `llm_query()`, `parallel_llm_query()`, `parallel_map()`, `FINAL()`, `FINAL_VAR()`, `get_session()`
+
+**Chunking:** `chunk_by_size()`, `chunk_by_sender()`, `chunk_by_date()`, `chunk_by_thread()`, `chunk_by_time()`
+
+**Filtering:** `filter_emails()`, `filter_by_keyword()`, `filter_by_sender()`
+
+**Workflows:** `inbox_triage()`, `weekly_summary()`, `find_action_items()`, `sender_analysis()`
+
+**Security:** `security_triage()`, `detect_attack_chains()`, `phishing_analysis()`, `classify_alerts()`, `extract_iocs()`, `map_to_mitre()`, `correlate_by_source_ip()`, `detect_suspicious_senders()`, `analyze_attachments()`, `extract_and_analyze_urls()`
+
+For complete function reference, see `references/rlm-function-reference.md`.
 
 ## Prerequisites & Setup
 
@@ -476,65 +454,60 @@ python skills/gmail/scripts/gmail_labels.py \
 
 ## Common Workflows
 
-### Workflow 1: Email Analysis/Triage (Use Agent Mode)
+### Workflow 1: Email Analysis/Triage (Agent Orchestrates RLM)
 
 When user asks to "triage my inbox" or "organize my emails" or "what's important?":
 
-**✅ Use Agent Mode:**
-```bash
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Triage my inbox and show urgent emails"
-```
+**✅ Agent Orchestrates RLM:**
+Agent interprets goal → executes `inbox_triage(emails)` via gmail_rlm_repl.py
 
-The agent automatically:
+The workflow automatically:
 - Categorizes emails (urgent/action/fyi/newsletter)
 - Identifies important senders
 - Extracts action items
-- Provides formatted summary
+- Agent presents formatted summary
 
-### Workflow 2: Security Alert Analysis (Use Agent Mode)
+See `examples/agent-conversations.md` Example 1 for complete dialogue.
+
+### Workflow 2: Security Alert Analysis (Agent Orchestrates RLM)
 
 When user asks to "check security alerts" or "analyze threats":
 
-**✅ Use Agent Mode:**
-```bash
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Triage security alerts from last week" \
-  --query "label:security-alerts newer_than:7d" \
-  --max-budget 2.00
-```
+**✅ Agent Orchestrates RLM:**
+Agent interprets goal → executes `security_triage(emails)` via gmail_rlm_repl.py
 
-The agent automatically:
+The workflow automatically:
 - Classifies alerts (P1-P5)
 - Extracts IOCs
 - Detects kill chains
 - Maps to MITRE ATT&CK
-- Provides executive summary
+- Agent presents executive summary
 
-### Workflow 3: Find Action Items (Use Agent Mode)
+See `examples/agent-conversations.md` Example 2 for complete dialogue with cost confirmation.
+
+### Workflow 3: Find Action Items (Agent Orchestrates RLM)
 
 When user asks "what do I need to do?" or "find action items":
 
-**✅ Use Agent Mode:**
-```bash
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Find action items with deadlines from this week" \
-  --query "newer_than:7d"
-```
+**✅ Agent Orchestrates RLM:**
+Agent interprets goal → executes `find_action_items(emails)` via gmail_rlm_repl.py
 
-The agent automatically:
+The workflow automatically:
 - Extracts tasks from emails
 - Identifies deadlines
 - Assigns priority
-- Groups by urgency
+- Agent presents grouped by urgency
 
-### Workflow 4: Summarize Inbox (Use Agent Mode)
+See `examples/agent-conversations.md` Example 3 for complete dialogue.
+
+### Workflow 4: Summarize Inbox (Agent Orchestrates RLM)
 
 When user asks "summarize my emails" or "what happened this week?":
 
-**✅ Use Agent Mode:**
-```bash
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Summarize my week" \
-  --query "newer_than:7d" \
-  --max-results 500
-```
+**✅ Agent Orchestrates RLM:**
+Agent interprets goal → executes `weekly_summary(emails)` via gmail_rlm_repl.py
+
+See `examples/agent-conversations.md` Example 4 for complete dialogue.
 
 ### Workflow 5: Simple Label Management (Use Normal Mode)
 
@@ -568,11 +541,8 @@ When user asks to "send an email to John":
 
 When user asks "show me emails from John":
 
-**If analyzing content or >5 emails → Use Agent Mode:**
-```bash
-.venv/bin/python skills/gmail/scripts/gmail_agent.py "Summarize emails from John" \
-  --query "from:john@example.com"
-```
+**If analyzing content or >5 emails → Agent Orchestrates RLM:**
+Agent composes: `filter_by_sender(emails, 'john@') + llm_query for summary`
 
 **If just reading 1-5 emails → Use Normal Mode:**
 ```bash
@@ -582,15 +552,15 @@ When user asks "show me emails from John":
   --format full
 ```
 
-### 🎯 Quick Decision Guide for Claude Code
+### 🎯 Quick Decision Guide for Claude Code Agent
 
-| User Request | Mode | Command |
-|--------------|------|---------|
-| "Triage my inbox" | **Agent** | `gmail_agent.py "Triage my inbox"` |
-| "Find urgent emails" | **Agent** | `gmail_agent.py "Find urgent emails"` |
-| "Summarize this week" | **Agent** | `gmail_agent.py "Summarize my week"` |
-| "Check security alerts" | **Agent** | `gmail_agent.py "Triage security alerts"` |
-| "Find action items" | **Agent** | `gmail_agent.py "Find action items"` |
+| User Request | Mode | Action |
+|--------------|------|--------|
+| "Triage my inbox" | **RLM Orchestration** | Execute `inbox_triage()` via gmail_rlm_repl.py |
+| "Find urgent emails" | **RLM Orchestration** | Compose filter + classification logic |
+| "Summarize this week" | **RLM Orchestration** | Execute `weekly_summary()` via gmail_rlm_repl.py |
+| "Check security alerts" | **RLM Orchestration** | Execute `security_triage()` via gmail_rlm_repl.py |
+| "Find action items" | **RLM Orchestration** | Execute `find_action_items()` via gmail_rlm_repl.py |
 | "Send email to John" | Normal | `gmail_send.py --to john@...` |
 | "Create label 'Work'" | Normal | `gmail_labels.py --action create --name Work` |
 | "Show me 3 emails from..." | Normal | `gmail_read.py --query "from:..." --max-results 3` |
