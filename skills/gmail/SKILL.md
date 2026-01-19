@@ -627,6 +627,228 @@ FINAL('\n---\n'.join(results))
 
 ---
 
+## Security Alert Triage (RLM)
+
+RLM mode includes specialized security analysis workflows for SOC/security teams processing Gmail-delivered security alerts.
+
+### Security Prerequisites
+
+In addition to RLM prerequisites, security workflows work best with:
+- Security alerts forwarded to Gmail (from CrowdStrike, Splunk, Azure Sentinel, etc.)
+- Gmail labels for organizing security alerts (e.g., "security-alerts")
+- `ANTHROPIC_API_KEY` set for LLM-powered analysis
+
+### Security Workflows
+
+**`security_triage(emails)`** - Complete security alert triage pipeline
+
+Performs comprehensive analysis:
+- Severity classification (P1-P5)
+- IOC extraction (IPs, domains, hashes, URLs)
+- Kill chain detection via time correlation
+- Source IP correlation analysis
+- Suspicious sender/phishing detection
+- Attachment and URL risk assessment
+- Executive summary generation
+
+Returns structured triage results with classifications, IOCs, detected attack chains, and actionable summary.
+
+**`detect_attack_chains(emails, window_minutes=5)`** - Multi-pass correlation for sophisticated attacks
+
+Analyzes temporal alert patterns to identify multi-stage attacks like:
+- Initial Access → Execution → Persistence
+- Reconnaissance → Exploitation → Lateral Movement
+- Data Staging → Exfiltration
+
+Returns detected attack chains with MITRE ATT&CK mappings, confidence scores, and affected systems.
+
+**`phishing_analysis(emails)`** - Specialized phishing detection
+
+Categorizes phishing attempts:
+- Credential harvesting
+- Business email compromise (BEC)
+- Brand impersonation
+- Malicious attachments
+- Malicious links
+
+Returns detailed phishing analysis with risk levels.
+
+**`enrich_with_threat_intel(iocs)`** - Prepare IOCs for threat intelligence enrichment
+
+Structures IOC data for integration with VirusTotal, AbuseIPDB, AlienVault OTX, or MISP (future enhancement).
+
+### Security Helper Functions
+
+**Severity & Classification:**
+- `extract_severity(alert)` - Normalize severity from security tools (CrowdStrike, Splunk, etc.)
+- `classify_alerts(emails, llm_query)` - Batch classify alerts into P1-P5 with LLM
+
+**IOC Extraction:**
+- `extract_iocs(emails)` - Extract IPs, domains, file hashes, email addresses, URLs
+- `validate_email_auth(email)` - Check SPF/DKIM/DMARC authentication status
+
+**MITRE ATT&CK Mapping:**
+- `map_to_mitre(alert, llm_query)` - Map alerts to MITRE technique IDs
+
+**Time-Based Correlation:**
+- `chunk_by_time(emails, minutes)` - Group alerts into time windows for kill chain detection
+- `detect_kill_chains(time_windows, llm_query)` - Analyze windows for attack sequences
+
+**Threat Analysis:**
+- `correlate_by_source_ip(emails, llm_query)` - Group and analyze alerts by source IP
+- `detect_suspicious_senders(emails, llm_query)` - Identify phishing, spoofing, domain squatting
+
+**Risk Assessment:**
+- `analyze_attachments(emails)` - Risk scoring for email attachments
+- `extract_and_analyze_urls(emails)` - Identify suspicious URLs
+- `deduplicate_security_alerts(emails)` - Remove duplicate alerts (e.g., same vuln across servers)
+
+### Security Example: Daily Alert Triage
+
+Process last 7 days of security alerts:
+
+```bash
+python skills/gmail/scripts/gmail_rlm_repl.py \
+  --query "label:security-alerts newer_than:7d" \
+  --max-results 500 \
+  --max-budget 2.00 \
+  --code "
+# Complete security triage
+result = security_triage(emails)
+
+# Print summary
+print(f'Total Alerts: {result[\"summary\"][\"total_alerts\"]}')
+print(f'P1 Critical: {len(result[\"classifications\"][\"P1\"])}')
+print(f'P2 High: {len(result[\"classifications\"][\"P2\"])}')
+print(f'Kill Chains Detected: {len(result[\"kill_chains\"])}')
+print(f'Unique IOCs: {len(result[\"iocs\"][\"ips\"])} IPs, {len(result[\"iocs\"][\"domains\"])} domains')
+
+# Output executive summary
+FINAL(result['executive_summary'])
+"
+```
+
+### Security Example: Kill Chain Detection
+
+Detect multi-stage attacks in time windows:
+
+```bash
+python skills/gmail/scripts/gmail_rlm_repl.py \
+  --query "label:security-alerts newer_than:24h" \
+  --max-results 200 \
+  --code "
+# Detect attack chains with 5-minute correlation windows
+chains = detect_attack_chains(emails, window_minutes=5)
+
+# Filter to P1/P2 severity
+critical_chains = [c for c in chains if c['severity'] in ['P1', 'P2']]
+
+if critical_chains:
+    output = '## Critical Attack Chains Detected\\n\\n'
+    for chain in critical_chains:
+        output += f\"**{chain['attack_id']}** ({chain['severity']})\\n\"
+        output += f\"Pattern: {chain['pattern']}\\n\"
+        output += f\"Duration: {chain['duration_minutes']} minutes\\n\"
+        output += f\"MITRE: {', '.join(chain['mitre_techniques'])}\\n\"
+        output += f\"Confidence: {chain['confidence']:.0%}\\n\"
+        output += f\"Affected: {', '.join(chain['affected_systems'][:3])}\\n\\n\"
+    FINAL(output)
+else:
+    FINAL('No critical attack chains detected.')
+"
+```
+
+### Security Example: IOC Extraction
+
+Extract and correlate indicators of compromise:
+
+```bash
+python skills/gmail/scripts/gmail_rlm_repl.py \
+  --query "label:security-alerts subject:malware" \
+  --max-results 100 \
+  --code "
+# Extract all IOCs
+iocs = extract_iocs(emails)
+
+print(f'Extracted {len(iocs[\"ips\"])} IPs')
+print(f'Extracted {len(iocs[\"domains\"])} domains')
+print(f'Extracted {len(iocs[\"file_hashes\"][\"sha256\"])} SHA256 hashes')
+
+# Correlate alerts by source IP
+if iocs['ips']:
+    ip_analysis = correlate_by_source_ip(emails, llm_query)
+
+    # Find IPs with multiple alerts (potential coordinated attack)
+    high_activity = {ip: data for ip, data in ip_analysis.items() if data['alert_count'] >= 5}
+
+    output = f'## High-Activity Source IPs ({len(high_activity)})\\n\\n'
+    for ip, data in sorted(high_activity.items(), key=lambda x: -x[1]['alert_count'])[:10]:
+        output += f\"**{ip}**: {data['alert_count']} alerts, {data['attack_type']}, {data['severity']}\\n\"
+
+    FINAL(output)
+else:
+    FINAL('No IPs found in alerts.')
+"
+```
+
+### Security Example: Phishing Analysis
+
+Detect and categorize phishing attempts:
+
+```bash
+python skills/gmail/scripts/gmail_rlm_repl.py \
+  --query "is:unread newer_than:3d" \
+  --max-results 100 \
+  --code "
+# Run phishing analysis
+results = phishing_analysis(emails)
+
+# Build report
+report = '## Phishing Analysis Report\\n\\n'
+report += f\"Credential Harvesting: {len(results['credential_harvesting'])}\\n\"
+report += f\"BEC Attempts: {len(results['bec_attempts'])}\\n\"
+report += f\"Brand Impersonation: {len(results['brand_impersonation'])}\\n\"
+report += f\"Malicious Attachments: {len(results['malicious_attachments'])}\\n\"
+report += f\"Malicious Links: {len(results['malicious_links'])}\\n\\n\"
+
+# Add details for high-risk items
+if results['credential_harvesting']:
+    report += '### Credential Harvesting Attempts\\n'
+    for attempt in results['credential_harvesting'][:5]:
+        report += f\"- {attempt['subject']} ({attempt['reason']})\\n\"
+
+report += f\"\\n### Summary\\n{results['summary']}\"
+
+FINAL(report)
+"
+```
+
+### Security Budget Controls
+
+Security triage can process large alert volumes. Use budget controls:
+
+```bash
+# Limit to $2.00 budget
+--max-budget 2.00
+
+# Limit to 50 LLM calls
+--max-calls 50
+
+# Adjust recursion depth for parallel processing
+--max-depth 10
+```
+
+### Security Caching
+
+Security patterns are cached separately with 7-day TTL (vs 24-hour general cache):
+- IOC analyses are cached (same malware hash seen 100 times)
+- MITRE mappings are cached (same technique patterns)
+- Severity classifications are cached (same alert types)
+
+Historical threat patterns are stored for recurring attack detection (30-day retention).
+
+---
+
 ## Implementation Notes
 
 **For Claude:**
@@ -657,10 +879,18 @@ FINAL('\n---\n'.join(results))
 
 ## Skill Version
 
-Version: 0.3.0
-Last Updated: 2026-01-17
+Version: 0.4.0
+Last Updated: 2026-01-19
 
 **Changelog:**
+- 0.4.0: Security-focused RLM enhancements
+  - Added `gmail_security_helpers.py` - Security analysis functions (severity, IOCs, MITRE, correlation)
+  - Added `gmail_security_workflows.py` - High-level workflows (security_triage, detect_attack_chains, phishing_analysis)
+  - Added `gmail_security_schemas.py` - JSON schemas for structured security data
+  - Enhanced caching with `SecurityPatternCache` (7-day TTL for security patterns)
+  - Added `ThreatPatternStore` for cross-session threat tracking (30-day retention)
+  - Security functions integrated into RLM REPL environment
+  - New capabilities: kill chain detection, source IP correlation, suspicious sender detection, IOC extraction
 - 0.3.0: RLM enhancement - Anthropic SDK migration and session tracking
   - Migrated `llm_query()` from Claude CLI subprocess to Anthropic Python SDK
   - Added session tracking with token usage stats (`get_session()`)

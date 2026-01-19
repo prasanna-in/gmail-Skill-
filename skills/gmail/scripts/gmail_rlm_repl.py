@@ -115,6 +115,31 @@ from gmail_rlm_helpers import (
     create_sender_analysis
 )
 
+# Import security modules
+from gmail_security_helpers import (
+    extract_severity,
+    classify_alerts,
+    extract_iocs,
+    validate_email_auth,
+    map_to_mitre,
+    chunk_by_time,
+    detect_kill_chains,
+    correlate_by_source_ip,
+    detect_suspicious_senders,
+    analyze_attachments,
+    extract_and_analyze_urls,
+    deduplicate_security_alerts
+)
+
+from gmail_security_workflows import (
+    create_security_triage,
+    create_detect_attack_chains,
+    create_enrich_with_threat_intel,
+    create_phishing_analysis
+)
+
+import gmail_security_schemas
+
 
 # OAuth scopes
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
@@ -900,6 +925,12 @@ def execute_rlm_code(
     find_action_items = create_find_action_items(llm_query, llm_query_json)
     sender_analysis = create_sender_analysis(llm_query, parallel_map)
 
+    # Create security workflow functions with injected dependencies
+    security_triage = create_security_triage(llm_query, parallel_map)
+    detect_attack_chains = create_detect_attack_chains(llm_query)
+    enrich_with_threat_intel = create_enrich_with_threat_intel()
+    phishing_analysis = create_phishing_analysis(llm_query)
+
     # Create checkpoint-enabled parallel_map wrapper
     def checkpoint_map(
         func_prompt: str,
@@ -947,6 +978,29 @@ def execute_rlm_code(
         'weekly_summary': weekly_summary,
         'find_action_items': find_action_items,
         'sender_analysis': sender_analysis,
+
+        # Security workflows
+        'security_triage': security_triage,
+        'detect_attack_chains': detect_attack_chains,
+        'enrich_with_threat_intel': enrich_with_threat_intel,
+        'phishing_analysis': phishing_analysis,
+
+        # Security helper functions
+        'extract_severity': extract_severity,
+        'classify_alerts': classify_alerts,
+        'extract_iocs': extract_iocs,
+        'validate_email_auth': validate_email_auth,
+        'map_to_mitre': map_to_mitre,
+        'chunk_by_time': chunk_by_time,
+        'detect_kill_chains': detect_kill_chains,
+        'correlate_by_source_ip': correlate_by_source_ip,
+        'detect_suspicious_senders': detect_suspicious_senders,
+        'analyze_attachments': analyze_attachments,
+        'extract_and_analyze_urls': extract_and_analyze_urls,
+        'deduplicate_security_alerts': deduplicate_security_alerts,
+
+        # Security schemas
+        'security_schemas': gmail_security_schemas,
 
         # Checkpoint support
         'checkpoint_parallel_map': checkpoint_map,
@@ -1065,6 +1119,23 @@ Pre-built Workflows:
   find_action_items(emails)            - Extract tasks with deadlines
   sender_analysis(emails, top_n)       - Analyze top senders' communication patterns
 
+Security Workflows:
+  security_triage(emails)              - Complete security alert triage (P1-P5, IOCs, kill chains)
+  detect_attack_chains(emails, window) - Multi-pass correlation for attack sequences
+  phishing_analysis(emails)            - Specialized phishing detection and categorization
+  enrich_with_threat_intel(iocs)       - Prepare IOCs for threat intel enrichment
+
+Security Helper Functions:
+  extract_severity(alert)              - Normalize severity from security tool formats
+  classify_alerts(emails, llm_query)   - Batch classify alerts into P1-P5
+  extract_iocs(emails)                 - Extract IPs, domains, hashes, URLs
+  map_to_mitre(alert, llm_query)       - Map to MITRE ATT&CK techniques
+  chunk_by_time(emails, minutes)       - Group emails into time windows
+  correlate_by_source_ip(emails, llm)  - Analyze alerts by source IP
+  detect_suspicious_senders(emails)    - Identify phishing/spoofing attempts
+  analyze_attachments(emails)          - Risk assessment for attachments
+  extract_and_analyze_urls(emails)     - Identify suspicious URLs
+
 Helper Functions:
   chunk_by_size(emails, n)             - Split into n-sized chunks (returns list of lists)
   chunk_by_sender(emails)              - Group by sender (returns dict)
@@ -1091,6 +1162,14 @@ Example:
   python gmail_rlm_repl.py --query "is:unread" --max-budget 1.00 --code "
   summary = weekly_summary(emails)
   FINAL(summary)
+  "
+
+  # Security alert triage
+  python gmail_rlm_repl.py --query "label:security-alerts newer_than:7d" --code "
+  result = security_triage(emails)
+  print(f'P1 Critical: {len(result[\"classifications\"][\"P1\"])}')
+  print(f'Kill Chains: {len(result[\"kill_chains\"])}')
+  FINAL(result['executive_summary'])
   "
         """
     )
