@@ -1366,7 +1366,7 @@ Example:
         # Output result
         if args.json_output:
             print(format_success({
-                "rlm_result": result,
+                "result": result,
                 "emails_processed": len(emails),
                 "query": metadata.get('query', ''),
                 "session": get_session().to_dict()

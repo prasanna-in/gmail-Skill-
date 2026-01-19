@@ -4,10 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Gmail Skill is a Claude Code integration that provides direct Gmail API access for email operations. It supports two operating modes:
+Gmail Skill is a Claude Code integration that provides direct Gmail API access for email operations. It supports three operating modes:
 
 - **Normal Mode**: Single script calls for specific operations (max 100 emails)
 - **RLM Mode**: Recursive Language Model processing for large-scale analysis (1000+ emails with parallel LLM sub-queries)
+- **Agent Mode**: Natural language interface with autonomous goal interpretation (NEW - recommended for most users)
 
 ## Common Commands
 
@@ -69,14 +70,145 @@ uv run pytest
 python3 -m py_compile skills/gmail/scripts/gmail_read.py
 ```
 
+## Agent Mode (Recommended)
+
+Agent Mode provides a natural language interface to Gmail operations, making sophisticated analyses accessible to everyone. It's the **recommended way** to use the Gmail Skill for most tasks.
+
+### Quick Start
+
+```bash
+# Agent mode (natural language - DEFAULT)
+.venv/bin/python skills/gmail/scripts/gmail_agent.py "Triage security alerts from last week"
+
+# Multi-turn dialogue
+.venv/bin/python skills/gmail/scripts/gmail_agent.py "Triage my inbox"
+> Show me urgent emails
+> Extract action items
+> done
+
+# Resume previous session
+.venv/bin/python skills/gmail/scripts/gmail_agent.py --resume session_20250119_143022
+
+# Script mode for power users (Python code)
+.venv/bin/python skills/gmail/scripts/gmail_agent.py --script "result = security_triage(emails); FINAL(result)"
+```
+
+### Key Features
+
+1. **Natural Language Goals**: No Python knowledge required
+   ```bash
+   .venv/bin/python skills/gmail/scripts/gmail_agent.py "Find action items with deadlines"
+   ```
+
+2. **Multi-Turn Dialogue**: Interactive conversations with context
+   ```
+   > Triage security alerts
+   Agent: [Shows triage results]
+   > Show me P1 details
+   Agent: [Shows P1 alerts]
+   > What IOCs were found?
+   Agent: [Shows IOCs]
+   ```
+
+3. **Session Persistence**: Resume conversations anytime
+   ```bash
+   # Sessions saved to ~/.gmail_agent_sessions/
+   .venv/bin/python skills/gmail/scripts/gmail_agent.py --list-sessions
+   ```
+
+4. **Budget Control**: Protect against runaway costs
+   ```bash
+   # Default: $1.00 budget
+   .venv/bin/python skills/gmail/scripts/gmail_agent.py "Analyze emails" --max-budget 5.00
+   ```
+
+5. **Adaptive Optimization**: Automatic parameter tuning
+   - Dynamic chunk sizing based on email count
+   - Parallel worker scaling
+   - Cost estimation and warnings
+
+### Available Workflows
+
+**Security Workflows:**
+```bash
+# Complete security alert triage
+.venv/bin/python skills/gmail/scripts/gmail_agent.py "Triage security alerts"
+
+# Attack chain detection
+.venv/bin/python skills/gmail/scripts/gmail_agent.py "Find attack chains in alerts"
+
+# Phishing analysis
+.venv/bin/python skills/gmail/scripts/gmail_agent.py "Analyze phishing attempts"
+```
+
+**General Email Workflows:**
+```bash
+# Inbox management
+.venv/bin/python skills/gmail/scripts/gmail_agent.py "Triage my inbox"
+
+# Sender analysis
+.venv/bin/python skills/gmail/scripts/gmail_agent.py "Summarize emails from top 5 senders"
+
+# Action items
+.venv/bin/python skills/gmail/scripts/gmail_agent.py "Find action items with deadlines"
+
+# Weekly summary
+.venv/bin/python skills/gmail/scripts/gmail_agent.py "Summarize my week"
+```
+
+### Command-Line Options
+
+```bash
+.venv/bin/python skills/gmail/scripts/gmail_agent.py [OPTIONS] "goal"
+
+Options:
+  --query QUERY              Gmail query string (default: newer_than:7d)
+  --max-results N            Max emails to fetch (default: 100)
+  --max-budget BUDGET        Budget limit in USD (default: $1.00)
+  --model MODEL              LLM model (default: claude-sonnet-4-20250514)
+  --format {text,json,html}  Output format (default: text)
+  --debug                    Show generated code
+  --non-interactive          Disable multi-turn dialogue
+  --resume SESSION_ID        Resume previous session
+  --list-sessions            List all sessions
+  --script CODE              Script mode (Python code)
+```
+
+### When to Use Agent Mode vs RLM Mode
+
+**Use Agent Mode when:**
+- ✅ You want natural language interface
+- ✅ You need multi-turn dialogue
+- ✅ You want automatic optimization
+- ✅ You're a non-technical user
+- ✅ You want pre-built workflows
+
+**Use RLM Mode (script mode) when:**
+- ✅ You need custom logic
+- ✅ You're a power user comfortable with Python
+- ✅ You need maximum control
+- ✅ You're building automation pipelines
+
+See `AGENT.md` for comprehensive documentation.
+
 ## Architecture
 
 ```
 skills/gmail/
 ├── SKILL.md              # Skill definition Claude reads for usage instructions
+├── AGENT.md              # Agent mode comprehensive documentation
+├── agent/                # Agent mode module (NEW)
+│   ├── __init__.py       # Package initialization
+│   ├── agent_core.py     # Main agent loop with multi-turn dialogue
+│   ├── goal_interpreter.py        # Natural language → RLM functions
+│   ├── function_orchestrator.py   # Execute RLM functions
+│   ├── result_formatter.py        # Format results (text/json/html)
+│   ├── state_manager.py           # Session persistence
+│   └── adaptive_optimizer.py      # Parameter optimization
 ├── scripts/              # Python execution scripts
 │   ├── gmail_common.py   # Shared: OAuth2, message parsing, validation
 │   ├── gmail_auth.py     # One-time OAuth setup (browser flow)
+│   ├── gmail_agent.py    # Agent mode CLI (NEW - recommended interface)
 │   ├── gmail_read.py     # Search and retrieve emails
 │   ├── gmail_send.py     # Compose and send emails
 │   ├── gmail_labels.py   # Label management (CRUD)
