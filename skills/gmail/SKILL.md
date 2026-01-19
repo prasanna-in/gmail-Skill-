@@ -706,7 +706,7 @@ FINAL('\\n'.join(summaries))
 - `--format`: Email format (minimal, metadata, full)
 - `--code`: Python code to execute in RLM environment
 - `--code-file`: Load code from file instead
-- `--model`: Model for LLM sub-queries (default: claude-3-5-haiku-20241022)
+- `--model`: Model for LLM sub-queries (default: claude-sonnet-4-20250514)
 - `--json-output`: Return result as JSON with session stats (token usage)
 
 ### Built-in Variables
@@ -1148,7 +1148,7 @@ Last Updated: 2026-01-19
 - 0.3.0: RLM enhancement - Anthropic SDK migration and session tracking
   - Migrated `llm_query()` from Claude CLI subprocess to Anthropic Python SDK
   - Added session tracking with token usage stats (`get_session()`)
-  - Added `--model` flag for model selection (default: claude-3-5-haiku-20241022)
+  - Added `--model` flag for model selection (default: claude-sonnet-4-20250514)
   - Added `--json-output` flag includes session stats with token counts
   - Requires `ANTHROPIC_API_KEY` environment variable
 - 0.2.0: Added RLM (Recursive Language Model) mode for large-scale email analysis
