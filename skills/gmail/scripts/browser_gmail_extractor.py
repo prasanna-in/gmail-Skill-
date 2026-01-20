@@ -55,7 +55,11 @@ class GmailBrowserExtractor:
         Raises:
             AgentBrowserError: If command fails
         """
-        cmd = ["agent-browser", "--session", self.session_name]
+        cmd = ["agent-browser"]
+
+        # Only add session flag if session_name is provided and not empty
+        if self.session_name:
+            cmd.extend(["--session", self.session_name])
 
         if not self.headless:
             cmd.append("--headed")
