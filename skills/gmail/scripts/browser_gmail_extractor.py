@@ -277,21 +277,99 @@ class GmailBrowserExtractor:
                 pass
             return None
 
-    def extract_emails_from_list(self, max_results: int = 10) -> list[dict]:
+    def _click_older_button(self) -> bool:
         """
-        Extract email data directly from the inbox list (fast method).
+        Find and click Gmail's [Older] pagination button.
 
-        This extracts subject, sender, date, and snippet from the email list
-        without opening individual emails. Much faster than clicking each email.
-
-        Args:
-            max_results: Maximum number of emails to extract
+        Uses multiple fallback strategies to locate the button:
+        1. Search by aria-label containing "Older"
+        2. Find navigation div and select rightmost button
+        3. Search by title/tooltip attributes
+        4. Check button is not disabled before clicking
 
         Returns:
-            List of email dicts
+            True if button was found and clicked, False otherwise
         """
-        print(f"\nExtracting up to {max_results} emails from Gmail inbox list...")
+        js_click = """
+        (() => {
+            // Strategy 1: Find by aria-label
+            let olderBtn = Array.from(document.querySelectorAll('button, div[role="button"]'))
+                .find(btn => {
+                    const label = btn.getAttribute('aria-label') || btn.textContent || '';
+                    return label.toLowerCase().includes('older');
+                });
 
+            // Strategy 2: Find in navigation div
+            if (!olderBtn) {
+                const navDiv = document.querySelector('div[role="navigation"]');
+                if (navDiv) {
+                    const buttons = navDiv.querySelectorAll('button');
+                    if (buttons.length >= 2) {
+                        olderBtn = buttons[buttons.length - 1];  // Rightmost button
+                    }
+                }
+            }
+
+            // Strategy 3: Find by title/tooltip
+            if (!olderBtn) {
+                olderBtn = document.querySelector('[title*="Older"], [data-tooltip*="Older"]');
+            }
+
+            // Strategy 4: Check if button is enabled and click
+            if (olderBtn && olderBtn.getAttribute('aria-disabled') !== 'true') {
+                olderBtn.click();
+                return true;
+            }
+            return false;
+        })()
+        """
+
+        try:
+            result = self._run_command("eval", js_click, expect_json=True)
+            return result.get("result", False)
+        except Exception:
+            return False
+
+    def _filter_duplicates(self, existing: list[dict], new: list[dict]) -> list[dict]:
+        """
+        Remove emails already in accumulated list.
+
+        Uses a temporary _page_unique_id field to identify duplicates.
+
+        Args:
+            existing: List of already-accumulated emails
+            new: List of newly extracted emails from current page
+
+        Returns:
+            List of new emails not in existing list
+        """
+        if not existing:
+            return new
+
+        existing_ids = {
+            email.get('_page_unique_id', email.get('subject', '') + email.get('from', ''))
+            for email in existing
+        }
+
+        return [
+            email for email in new
+            if email.get('_page_unique_id', email.get('subject', '') + email.get('from', ''))
+            not in existing_ids
+        ]
+
+    def _extract_emails_from_current_page(self, max_results: int) -> list[dict]:
+        """
+        Extract emails from currently visible Gmail page.
+
+        This reuses the JavaScript extraction logic from extract_emails_from_list
+        but adds a _page_unique_id field for deduplication across pages.
+
+        Args:
+            max_results: Maximum number of emails to extract from this page
+
+        Returns:
+            List of email dicts with _page_unique_id field
+        """
         js_extract_all = f"""
         (() => {{
             const rows = Array.from(document.querySelectorAll('tr.zA'))
@@ -300,11 +378,6 @@ class GmailBrowserExtractor:
 
             return rows.map(row => {{
                 const cells = row.querySelectorAll('td');
-
-                // Gmail row structure:
-                // - Cell 3-4: Sender
-                // - Cell 4-5: Subject and snippet
-                // - Cell 6-7: Date
 
                 // Extract sender (typically cell 3 or 4)
                 const senderCell = cells[3] || cells[4];
@@ -318,7 +391,6 @@ class GmailBrowserExtractor:
                 const subjectText = subjectCell?.innerText?.trim() || '(No subject)';
 
                 // Try to separate subject from snippet
-                // Gmail shows: "Subject - Snippet"
                 let subject = subjectText;
                 let snippet = '';
                 if (subjectText.includes('\\n')) {{
@@ -335,26 +407,144 @@ class GmailBrowserExtractor:
                             dateCell?.innerText?.trim() ||
                             new Date().toISOString();
 
-                // For body, we include the snippet for now
-                // To get full body, would need to click the email
                 const body = snippet;
+
+                // Create unique ID for deduplication (subject||sender||date)
+                const uniqueId = subject.substring(0, 100) + '||' + sender + '||' + date;
 
                 return {{
                     subject: subject.substring(0, 500),
                     from: sender,
                     to: '',  // Not available in list view
                     date: date,
-                    body: body.substring(0, 10000)
+                    body: body.substring(0, 10000),
+                    _page_unique_id: uniqueId
                 }};
             }});
         }})()
         """
 
-        result = self._run_command("eval", js_extract_all, expect_json=True)
-        emails = result.get("result", [])
+        try:
+            result = self._run_command("eval", js_extract_all, expect_json=True)
+            emails = result.get("result", [])
+            return emails
+        except Exception as e:
+            print(f"  Warning: Failed to extract emails from current page: {e}")
+            return []
 
-        print(f"Successfully extracted {len(emails)} emails from list")
-        return emails
+    def paginate_to_load_more_emails(
+        self,
+        target_count: int,
+        max_pages: int = 20,
+        page_size: int = 50
+    ) -> tuple[int, list[dict]]:
+        """
+        Navigate Gmail pages using [Older] button clicks to load more emails.
+
+        Gmail uses server-side pagination with [Older]/[Newer] buttons instead
+        of infinite scroll. This method clicks through pages to accumulate emails.
+
+        Args:
+            target_count: Target number of emails to accumulate
+            max_pages: Maximum number of pages to navigate (default: 20)
+            page_size: Expected emails per page (default: 50)
+
+        Returns:
+            Tuple of (total_count, all_emails_list)
+        """
+        print(f"Loading emails via pagination (target: {target_count}, max pages: {max_pages})...")
+
+        accumulated_emails = []
+        current_page = 1
+        stall_count = 0
+
+        while len(accumulated_emails) < target_count and current_page <= max_pages:
+            print(f"  Page {current_page}: Extracting emails...")
+
+            # Extract emails from current page
+            page_emails = self._extract_emails_from_current_page(
+                max_results=min(page_size, target_count - len(accumulated_emails))
+            )
+
+            if not page_emails:
+                print(f"  Page {current_page}: No emails found, stopping")
+                break
+
+            # Filter duplicates
+            new_emails = self._filter_duplicates(accumulated_emails, page_emails)
+
+            # Detect stalls (no new emails)
+            if not new_emails:
+                stall_count += 1
+                print(f"  Page {current_page}: No new emails (stall count: {stall_count})")
+                if stall_count >= 2:
+                    print(f"  No new emails after {stall_count} pages, stopping")
+                    break
+            else:
+                accumulated_emails.extend(new_emails)
+                stall_count = 0
+                print(f"  Page {current_page}: Added {len(new_emails)} new emails (total: {len(accumulated_emails)})")
+
+            # Check if target reached
+            if len(accumulated_emails) >= target_count:
+                print(f"  Target reached: {len(accumulated_emails)} emails")
+                break
+
+            # Click [Older] button to next page
+            print(f"  Page {current_page}: Clicking [Older] button...")
+            if not self._click_older_button():
+                print(f"  [Older] button not found or disabled, stopping")
+                break
+
+            time.sleep(2.5)  # Wait for page load
+            current_page += 1
+
+        print(f"Pagination complete: {len(accumulated_emails)} emails across {current_page} pages")
+        return len(accumulated_emails), accumulated_emails
+
+    def extract_emails_from_list(self, max_results: int = 10) -> list[dict]:
+        """
+        Extract email data directly from the inbox list (fast method).
+
+        This extracts subject, sender, date, and snippet from the email list
+        without opening individual emails. Much faster than clicking each email.
+
+        For large requests (>50 emails), automatically uses pagination with
+        [Older] button clicks to navigate through multiple pages.
+
+        Args:
+            max_results: Maximum number of emails to extract
+
+        Returns:
+            List of email dicts
+        """
+        print(f"\nExtracting up to {max_results} emails from Gmail inbox list...")
+
+        if max_results <= 50:
+            # Single page - use direct extraction
+            emails = self._extract_emails_from_current_page(max_results)
+
+            # Remove temporary _page_unique_id field
+            for email in emails:
+                email.pop('_page_unique_id', None)
+
+            print(f"Successfully extracted {len(emails)} emails from list")
+            return emails
+        else:
+            # Multi-page - use pagination
+            max_pages = min((max_results // 50) + 2, 25)
+            total_count, all_emails = self.paginate_to_load_more_emails(
+                target_count=max_results,
+                max_pages=max_pages,
+                page_size=50
+            )
+
+            # Remove temporary _page_unique_id field
+            for email in all_emails:
+                email.pop('_page_unique_id', None)
+
+            print(f"Successfully extracted {len(all_emails)} emails across multiple pages")
+            return all_emails[:max_results]
 
     def extract_emails(self, max_results: int = 10, include_body: bool = False) -> list[dict]:
         """

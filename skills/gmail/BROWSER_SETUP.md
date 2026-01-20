@@ -194,8 +194,8 @@ This runs the core extraction logic directly without the wrapper script.
 | **Setup** | OAuth2 credentials, approval flow | One-time manual login |
 | **Auth** | API tokens | Browser cookies |
 | **MFA/SSO** | Complex (if supported) | Natural (login in browser) |
-| **Speed** | ~100ms per email | ~2-3 sec for 50 emails |
-| **Max emails** | 1000s (paginated) | 50-100 (practical limit) |
+| **Speed** | ~100ms per email | ~30 sec for 500 emails |
+| **Max emails** | 1000s (paginated) | 1,250 (25 pages) |
 | **Corporate restrictions** | Often blocked | Usually works |
 | **Maintenance** | Stable API | May break if Gmail UI changes |
 

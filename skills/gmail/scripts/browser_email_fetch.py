@@ -279,9 +279,27 @@ def fetch_via_browser(url: str, folder: str, max_results: int, session_name: str
         print("Or use --mock flag for POC demonstration with mock data.", file=sys.stderr)
         raise RuntimeError("agent-browser not installed")
 
+    # Gmail browser extraction supports pagination (up to 25 pages × 50 emails = 1250)
+    # For larger requests, warn the user
+    actual_max = min(max_results, 1250)  # Cap at 1250 for browser extraction (25 pages)
+    if max_results > 1250:
+        print(
+            f"\nWARNING: Browser extraction requested {max_results} emails, but limited to {actual_max}.",
+            file=sys.stderr
+        )
+        print(
+            f"Browser extraction supports up to 1,250 emails (25 pages).",
+            file=sys.stderr
+        )
+        print(
+            f"For {max_results}+ emails, use Gmail API (--source gmail) instead.",
+            file=sys.stderr
+        )
+        print(file=sys.stderr)
+
     # Extract emails via browser (real or mock)
     browser_emails = extract_emails_via_browser(
-        url, folder, max_results, session_name, use_mock
+        url, folder, actual_max, session_name, use_mock
     )
 
     # Normalize to Gmail schema
@@ -298,7 +316,10 @@ def fetch_via_browser(url: str, folder: str, max_results: int, session_name: str
             "folder": folder,
             "format": "full",
             "timestamp": datetime.now().isoformat(),
-            "session": session_name if not use_mock else "mock"
+            "session": session_name if not use_mock else "mock",
+            "requested_count": max_results,
+            "actual_count": len(normalized_emails),
+            "limitation_note": "Browser extraction limited to ~50-100 emails per request" if max_results > 100 else None
         }
     }
 

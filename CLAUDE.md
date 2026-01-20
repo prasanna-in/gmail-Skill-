@@ -138,7 +138,7 @@ agent-browser open https://outlook.office365.com  # Outlook 365
   --source browser \
   --webmail-url "https://mail.google.com/mail/u/0" \
   --webmail-folder "Inbox" \
-  --max-results 100 \
+  --max-results 500 \
   --code "
 result = inbox_triage(emails)
 FINAL(f'Urgent: {len(result[\"urgent\"])}, Action: {len(result[\"action_required\"])}')
@@ -151,7 +151,7 @@ FINAL(f'Urgent: {len(result[\"urgent\"])}, Action: {len(result[\"action_required
   --source browser \
   --webmail-url "https://outlook.office365.com" \
   --webmail-folder "Security Alerts" \
-  --max-results 100 \
+  --max-results 500 \
   --code "
 result = security_triage(emails)
 FINAL(result['executive_summary'])
