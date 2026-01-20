@@ -223,6 +223,89 @@ FINAL(output)
 
 For complete function reference, see `references/rlm-function-reference.md`.
 
+## Browser-Based Email Access (Alternative to API)
+
+For environments where Gmail API access is blocked or unavailable.
+
+### When to Suggest Browser Approach
+
+**Trigger patterns** (user says any of these):
+- "OAuth2 is blocked" / "API access disabled"
+- "My corporate Gmail..." / "enterprise email"
+- "Can't get credentials.json" / "admin won't approve"
+- "Using Outlook" / "Exchange" / "Office 365"
+- Authentication errors persist after multiple gmail_auth.py attempts
+- "SSO required" / "MFA blocking API"
+
+### Decision Flow
+
+```
+IF (user mentions corporate/enterprise email OR OAuth2 blocked OR Outlook/Exchange)
+THEN suggest browser approach
+ELSE use Gmail API (default)
+```
+
+### Browser Approach Overview
+
+**Compatible with:**
+- Corporate Gmail (Google Workspace with API disabled)
+- Outlook 365 / Exchange Online
+- Any webmail behind SSO/MFA
+
+**How it works:**
+1. User logs in once manually to webmail (handles SSO/MFA naturally)
+2. Browser session persists (agent-browser maintains cookies)
+3. Agent uses browser automation to extract emails (93% less context than DOM scraping)
+4. Data normalized to Gmail API format
+5. Same RLM functions work identically (`inbox_triage()`, `security_triage()`, etc.)
+
+### Agent Conversation Pattern
+
+```
+User: "My corporate Gmail blocks API access"
+
+Agent Response:
+"For corporate Gmail with API restrictions, I can use a browser-based approach:
+
+**Setup** (one-time):
+```bash
+npm install -g agent-browser
+agent-browser install
+agent-browser open https://mail.google.com  # Login manually
+```
+
+**Then run analysis:**
+```bash
+.venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
+  --source browser \
+  --webmail-url "https://mail.google.com/mail/u/0" \
+  --max-results 100 \
+  --code "result = inbox_triage(emails); FINAL(...)"
+```
+
+This handles SSO/MFA via your normal login and uses the same RLM functions.
+Would you like to try this?"
+```
+
+### Browser vs API Comparison
+
+| Feature | Gmail API | Browser Approach |
+|---------|-----------|------------------|
+| Setup | OAuth2 credentials | One-time manual login |
+| Auth | API tokens | Browser session cookies |
+| MFA/SSO | Complex (if supported) | Natural (login in browser) |
+| Speed | ~100ms per email | ~2-3 sec per email |
+| Max emails | 1000+ (paginated) | 100-200 (POC limit) |
+| Corporate restrictions | Often blocked | Usually works |
+| RLM compatibility | ✅ Full support | ✅ Full support (same code) |
+
+### When NOT to Suggest Browser
+
+- User has working `credentials.json` and `token.json`
+- User is on personal Gmail
+- User successfully authenticated with `gmail_auth.py`
+- Speed is critical (browser is 20-30x slower)
+
 ## Prerequisites & Setup
 
 Before using this skill, the user must complete a one-time OAuth2 setup:

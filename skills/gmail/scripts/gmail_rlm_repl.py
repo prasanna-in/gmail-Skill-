@@ -53,6 +53,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -883,12 +884,19 @@ def load_emails_from_file(filepath: str) -> tuple[list[dict], dict]:
         raise ValueError(f"Invalid email file: status={data.get('status')}")
 
     emails = data.get('messages', [])
+    file_metadata = data.get('metadata', {})
     metadata = {
         "query": data.get('query', 'loaded_from_file'),
         "count": data.get('result_count', len(emails)),
-        "format": data.get('metadata', {}).get('format', 'unknown'),
+        "format": file_metadata.get('format', 'unknown'),
+        "source": file_metadata.get('source', 'file'),
         "source_file": filepath
     }
+
+    # Preserve browser-specific metadata if present
+    if file_metadata.get('source') == 'browser':
+        metadata['webmail_url'] = file_metadata.get('webmail_url', '')
+        metadata['folder'] = file_metadata.get('folder', '')
 
     status_done(f"Loaded {len(emails)} emails")
 
@@ -1174,12 +1182,21 @@ Example:
         """
     )
 
-    # Input source (mutually exclusive)
-    input_group = parser.add_mutually_exclusive_group(required=True)
+    # Email source selection
+    parser.add_argument(
+        "--source",
+        type=str,
+        choices=["gmail", "browser"],
+        default="gmail",
+        help="Email source: 'gmail' for Gmail API, 'browser' for webmail (default: gmail)"
+    )
+
+    # Input source (mutually exclusive for Gmail API mode)
+    input_group = parser.add_mutually_exclusive_group(required=False)
     input_group.add_argument(
         "--query",
         type=str,
-        help="Gmail search query to fetch emails"
+        help="Gmail search query to fetch emails (used with --source gmail)"
     )
     input_group.add_argument(
         "--load-file",
@@ -1187,11 +1204,38 @@ Example:
         help="Load emails from JSON file (from gmail_bulk_read.py)"
     )
 
+    # Browser source options
+    parser.add_argument(
+        "--webmail-url",
+        type=str,
+        help="Webmail URL for browser source (e.g., https://outlook.office365.com)"
+    )
+
+    parser.add_argument(
+        "--webmail-folder",
+        type=str,
+        default="Inbox",
+        help="Folder to read from browser source (default: Inbox)"
+    )
+
+    parser.add_argument(
+        "--browser-session",
+        type=str,
+        default="gmail_corporate",
+        help="Browser session name for --source browser (default: gmail_corporate)"
+    )
+
+    parser.add_argument(
+        "--browser-mock",
+        action="store_true",
+        help="Use mock data for browser source (for testing pipeline)"
+    )
+
     parser.add_argument(
         "--max-results",
         type=int,
         default=200,
-        help="Maximum emails to fetch (default: 200, only used with --query)"
+        help="Maximum emails to fetch (default: 200)"
     )
 
     parser.add_argument(
@@ -1307,6 +1351,38 @@ Example:
 
     args = parser.parse_args()
 
+    # Validate source-specific arguments
+    if args.source == "browser":
+        if not args.webmail_url:
+            print(json.dumps({
+                "status": "error",
+                "error_type": "ValidationError",
+                "message": "--webmail-url is required when using --source browser"
+            }), file=sys.stderr)
+            sys.exit(1)
+        if args.query or args.load_file:
+            print(json.dumps({
+                "status": "error",
+                "error_type": "ValidationError",
+                "message": "--query and --load-file cannot be used with --source browser"
+            }), file=sys.stderr)
+            sys.exit(1)
+    elif args.source == "gmail":
+        if not args.query and not args.load_file:
+            print(json.dumps({
+                "status": "error",
+                "error_type": "ValidationError",
+                "message": "Either --query or --load-file is required when using --source gmail"
+            }), file=sys.stderr)
+            sys.exit(1)
+        if args.webmail_url:
+            print(json.dumps({
+                "status": "error",
+                "error_type": "ValidationError",
+                "message": "--webmail-url can only be used with --source browser"
+            }), file=sys.stderr)
+            sys.exit(1)
+
     # Check for Anthropic API key
     if not check_anthropic_api_key():
         print(json.dumps({
@@ -1349,8 +1425,64 @@ Example:
         code = args.code
 
     try:
-        # Load emails
-        if args.query:
+        # Load emails based on source
+        if args.source == "browser":
+            # Browser-based email fetching
+            import tempfile
+            temp_file = tempfile.NamedTemporaryFile(
+                mode='w',
+                suffix='.json',
+                delete=False
+            )
+            temp_filepath = temp_file.name
+            temp_file.close()
+
+            # Call browser_email_fetch.py script
+            script_dir = Path(__file__).parent
+            browser_fetch_script = script_dir / "browser_email_fetch.py"
+
+            if not browser_fetch_script.exists():
+                raise FileNotFoundError(
+                    f"Browser fetch script not found: {browser_fetch_script}"
+                )
+
+            # Build command list
+            cmd = [
+                sys.executable,
+                str(browser_fetch_script),
+                "--url", args.webmail_url,
+                "--folder", args.webmail_folder,
+                "--max-results", str(args.max_results),
+                "--session", args.browser_session,
+                "--output", temp_filepath
+            ]
+            if args.verbose:
+                cmd.append("--verbose")
+            if args.browser_mock:
+                cmd.append("--mock")
+
+            result = subprocess.run(cmd, capture_output=True, text=True)
+
+            if result.returncode != 0:
+                # Try to parse error message
+                try:
+                    error_data = json.loads(result.stderr)
+                    error_msg = error_data.get("message", result.stderr)
+                except:
+                    error_msg = result.stderr
+
+                raise RuntimeError(
+                    f"Browser email fetch failed: {error_msg}"
+                )
+
+            # Load emails from temp file
+            emails, metadata = load_emails_from_file(temp_filepath)
+
+            # Clean up temp file
+            Path(temp_filepath).unlink(missing_ok=True)
+
+        elif args.query:
+            # Gmail API query
             emails, metadata = fetch_emails_for_repl(
                 query=args.query,
                 max_results=args.max_results,
@@ -1358,6 +1490,7 @@ Example:
                 verbose=args.verbose
             )
         else:
+            # Load from file
             emails, metadata = load_emails_from_file(args.load_file)
 
         # Execute code

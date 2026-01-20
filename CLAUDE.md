@@ -57,6 +57,65 @@ FINAL(result['executive_summary'])
 "
 ```
 
+### Browser-Based Email Access
+
+For environments where API access is blocked (corporate Gmail, Outlook 365, Exchange):
+
+**When to use:**
+- Corporate Gmail with API disabled
+- Google Workspace with OAuth2 restrictions
+- Outlook 365 / Exchange Online
+- Any webmail behind SSO/MFA
+
+**One-time setup:**
+```bash
+# Install agent-browser
+npm install -g agent-browser
+agent-browser install
+
+# Login once (browser opens - use YOUR webmail URL)
+agent-browser open https://mail.google.com  # Corporate Gmail
+# OR
+agent-browser open https://outlook.office365.com  # Outlook 365
+
+# Complete SSO/MFA in browser, click "Stay signed in"
+```
+
+**Examples:**
+
+**Corporate Gmail:**
+```bash
+.venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
+  --source browser \
+  --webmail-url "https://mail.google.com/mail/u/0" \
+  --webmail-folder "Inbox" \
+  --max-results 100 \
+  --code "
+result = inbox_triage(emails)
+FINAL(f'Urgent: {len(result[\"urgent\"])}, Action: {len(result[\"action_required\"])}')
+"
+```
+
+**Outlook 365 Security Alerts:**
+```bash
+.venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
+  --source browser \
+  --webmail-url "https://outlook.office365.com" \
+  --webmail-folder "Security Alerts" \
+  --max-results 100 \
+  --code "
+result = security_triage(emails)
+FINAL(result['executive_summary'])
+"
+```
+
+**How it works:**
+1. Browser session persists after initial login
+2. `browser_email_fetch.py` uses agent-browser to navigate webmail
+3. Emails extracted with 93% less context (snapshot refs vs DOM)
+4. Data normalized to Gmail API schema
+5. Same RLM functions work identically
+
 ### Development
 
 ```bash
