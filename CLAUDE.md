@@ -128,6 +128,23 @@ agent-browser open https://mail.google.com  # Corporate Gmail
 agent-browser open https://outlook.office365.com  # Outlook 365
 
 # Complete SSO/MFA in browser, click "Stay signed in"
+# Browser session persists automatically - no need to re-login
+```
+
+**Simplified Usage (Recommended):**
+```bash
+# Use default browser session (no --browser-session flag needed)
+# The browser will automatically use your existing logged-in session
+
+.venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
+  --source browser \
+  --webmail-url "https://mail.google.com/mail/u/0" \
+  --browser-session "" \
+  --max-results 200 \
+  --code "
+result = security_triage(emails)
+FINAL(result['executive_summary'])
+"
 ```
 
 **Examples:**
@@ -192,6 +209,23 @@ FINAL(result['executive_summary'])
 4. **Full body mode:** Clicks each email individually (slow, complete body content)
 5. Data normalized to Gmail API schema
 6. Same RLM functions work identically
+
+**Troubleshooting Browser Access:**
+
+If you see "Browser not launched. Call launch first" error:
+```bash
+# Solution 1: Use default session (recommended)
+# Simply omit --browser-session or use --browser-session ""
+
+# Solution 2: Ensure browser is already logged in
+agent-browser open https://mail.google.com
+# Then run your analysis command
+
+# Solution 3: Use non-session browser mode
+# The browser_gmail_extractor.py now supports running without session flags
+```
+
+**Note:** The `--browser-session` flag creates isolated browser sessions. For most use cases, the default browser session (which persists your login) is simpler and more reliable.
 
 ### Development
 
@@ -320,7 +354,9 @@ skills/gmail/
 │   ├── gmail_rlm_checkpoint.py   # Checkpoint/resume for long analyses
 │   ├── gmail_security_helpers.py     # Security analysis functions
 │   ├── gmail_security_workflows.py   # Security triage workflows
-│   └── gmail_security_schemas.py     # JSON schemas for security data
+│   ├── gmail_security_schemas.py     # JSON schemas for security data
+│   ├── browser_email_fetch.py        # Browser-based email extraction (reads only)
+│   └── browser_gmail_extractor.py    # Real Gmail browser automation with agent-browser
 ├── references/           # Documentation
 │   ├── rlm-function-reference.md # Complete catalog of 30+ RLM functions
 │   ├── api-reference.md          # Gmail API details
@@ -569,3 +605,33 @@ Email Count | Workflow      | Complexity | Mode
 ```
 
 **Best Practice:** For Agent orchestration, always check estimated email count before selecting mode.
+
+### 6. Browser Session Management with agent-browser
+
+**Issue:** Using `--browser-session` flag with agent-browser caused "Browser not launched. Call launch first" errors.
+
+**Root Cause:** The `--session` flag in agent-browser requires explicit session management (launch/close), but the default browser mode automatically uses the persistent browser session.
+
+**Solution (2026-01-20):**
+1. **Updated browser_gmail_extractor.py** - Made session flag optional:
+   ```python
+   # Before: Always added --session flag
+   cmd = ["agent-browser", "--session", self.session_name]
+
+   # After: Only add session if explicitly provided
+   cmd = ["agent-browser"]
+   if self.session_name:
+       cmd.extend(["--session", self.session_name])
+   ```
+
+2. **Simplified usage** - Use `--browser-session ""` or omit the flag entirely to use default browser:
+   ```bash
+   # Recommended: Use default browser (no session management needed)
+   .venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
+     --source browser \
+     --webmail-url "https://mail.google.com/mail/u/0" \
+     --browser-session "" \
+     --max-results 200
+   ```
+
+**Best Practice:** Use default browser session (empty string) for simplicity. Only use named sessions when you need isolation between multiple accounts.

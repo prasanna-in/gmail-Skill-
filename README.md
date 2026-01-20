@@ -10,6 +10,7 @@ This Skill can make your Gmail behave a Datastore allowing you to querry it.
 - **Send Emails:** Compose and send emails with attachments
 - **Manage Labels:** Create labels and organize emails
 - **RLM Mode:** Large-scale email analysis with recursive LLM sub-queries (1000+ emails)
+- **Browser-Based Access:** Works with corporate Gmail, Outlook 365, and webmail behind SSO/MFA
 - **Bulk Operations:** Process large email datasets with pagination
 - **Direct API Integration:** No MCP server required - uses standalone Python scripts
 - **OAuth2 Authentication:** Secure browser-based authentication flow
@@ -281,6 +282,75 @@ FINAL(summaries)
 
 **Note:** RLM mode requires the `ANTHROPIC_API_KEY` environment variable to be set.
 
+## Browser-Based Email Access
+
+For environments where Gmail API access is blocked (corporate Gmail, Google Workspace with restrictions, Outlook 365, Exchange), the skill now supports browser-based email extraction.
+
+### When to Use Browser Mode
+
+- **Corporate Gmail** with API disabled
+- **Google Workspace** with OAuth2 restrictions
+- **Outlook 365 / Exchange Online**
+- Any webmail behind SSO/MFA that blocks API access
+
+### Setup
+
+```bash
+# Install agent-browser (one-time setup)
+npm install -g agent-browser
+agent-browser install
+
+# Login to your webmail (browser opens, complete MFA/SSO)
+agent-browser open https://mail.google.com
+# Session persists - no need to re-login
+```
+
+### Usage Examples
+
+**Fast Inbox Triage (Snippet Mode):**
+```bash
+.venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
+  --source browser \
+  --webmail-url "https://mail.google.com/mail/u/0" \
+  --browser-session "" \
+  --max-results 200 \
+  --code "
+result = inbox_triage(emails)
+FINAL(f'Urgent: {len(result[\"urgent\"])}, Action: {len(result[\"action_required\"])}')
+"
+```
+
+**Security Analysis (Full Body Mode):**
+```bash
+.venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
+  --source browser \
+  --webmail-url "https://mail.google.com/mail/u/0" \
+  --browser-session "" \
+  --max-results 100 \
+  --full-body \
+  --code "
+result = security_triage(emails)
+FINAL(result['executive_summary'])
+"
+```
+
+### Performance
+
+- **Snippet mode (default):** ~90 seconds for 500 emails
+- **Full body mode (--full-body):** ~25 minutes for 500 emails (~3s per email)
+
+### Browser Mode vs API Mode
+
+| Feature | API Mode | Browser Mode |
+|---------|----------|--------------|
+| Speed | Very fast | Slower (snippet mode: fast, full body: slow) |
+| Setup | OAuth2 credentials | Browser login (MFA/SSO supported) |
+| Corporate Gmail | ❌ Often blocked | ✅ Works |
+| Max emails | Unlimited | ~1,250 (25 pages) |
+| Full body | Always included | Optional (--full-body flag) |
+
+**Recommendation:** Use API mode when possible. Use browser mode when API access is blocked.
+
 ## Project Structure
 
 ```
@@ -304,7 +374,9 @@ gmail_skill/
 │       │   ├── gmail_mark_read.py # Mark emails as read
 │       │   ├── gmail_bulk_read.py # Pagination for 1000+ emails
 │       │   ├── gmail_rlm_repl.py  # RLM Python REPL environment
-│       │   └── gmail_rlm_helpers.py # RLM chunking/filtering helpers
+│       │   ├── gmail_rlm_helpers.py # RLM chunking/filtering helpers
+│       │   ├── browser_email_fetch.py # Browser-based email extraction
+│       │   └── browser_gmail_extractor.py # Gmail browser automation with agent-browser
 │       ├── references/
 │       │   ├── api-reference.md   # Gmail API technical details
 │       │   └── troubleshooting.md # Common issues and solutions
@@ -392,6 +464,11 @@ When you say "check my email", Claude automatically:
 - Check credentials files exist: `ls credentials/`
 - Try verbose mode: `python gmail_read.py --query "is:unread" --verbose`
 
+**Browser mode "Browser not launched" error**
+- Solution: Use `--browser-session ""` (empty string) for default browser
+- Ensure you've logged in once: `agent-browser open https://mail.google.com`
+- The browser session persists automatically - no need for session management
+
 ### Detailed Troubleshooting
 
 For comprehensive troubleshooting, see:
@@ -440,5 +517,5 @@ For issues or questions:
 
 ---
 
-Version: 0.2.0
-Last Updated: 2026-01-18
+Version: 0.3.0
+Last Updated: 2026-01-20
