@@ -30,31 +30,80 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 All scripts require the virtual environment Python:
 
 ```bash
-# Read/search emails
+# Smart Dispatcher (NEW - auto-selects Normal vs RLM mode)
+.venv/bin/python skills/gmail/scripts/gmail_smart.py analyze "find action items" --query "newer_than:1d"
+.venv/bin/python skills/gmail/scripts/gmail_smart.py analyze "triage inbox" --query "is:inbox newer_than:7d"
+.venv/bin/python skills/gmail/scripts/gmail_smart.py analyze "triage security alerts" --query "label:security-alerts"
+
+# Read/search emails (Normal Mode)
 .venv/bin/python skills/gmail/scripts/gmail_read.py --query "is:unread" --max-results 20 --format metadata
 
-# Send email
+# Send email (Normal Mode)
 .venv/bin/python skills/gmail/scripts/gmail_send.py --to "user@example.com" --subject "Subject" --body "Body"
 
-# Manage labels
+# Manage labels (Normal Mode)
 .venv/bin/python skills/gmail/scripts/gmail_labels.py --action list
 
 # Bulk read (for large datasets)
 .venv/bin/python skills/gmail/scripts/gmail_bulk_read.py --query "newer_than:30d" --max-results 500
 
-# RLM analysis
+# RLM analysis (manual mode selection)
 .venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py --query "newer_than:7d" --max-results 200 --code "
 by_sender = chunk_by_sender(emails)
 FINAL(str(len(by_sender)) + ' unique senders')
 "
 
-# Security alert triage
+# Security alert triage (RLM mode)
 .venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py --query "label:security-alerts newer_than:7d" --max-results 500 --max-budget 2.00 --code "
 result = security_triage(emails)
 print(f'P1 Critical: {len(result[\"classifications\"][\"P1\"])}')
 print(f'Kill Chains: {len(result[\"kill_chains\"])}')
 FINAL(result['executive_summary'])
 "
+```
+
+### Smart Mode Selection (gmail_smart.py)
+
+**NEW:** The `gmail_smart.py` dispatcher automatically decides whether to use Normal Mode or RLM Mode based on:
+- **Email count**: <100 → Normal, ≥100 → RLM
+- **Task complexity**: Simple workflows (triage, action items) vs complex (security analysis, attack chains)
+- **Intent**: send/label/read always use Normal Mode
+
+**Decision Logic:**
+```
+┌─────────────────────────────────────┐
+│ Simple operation (send/label/read)? │ → Normal Mode
+├─────────────────────────────────────┤
+│ Email count ≥ 100?                  │ → RLM Mode (pagination)
+├─────────────────────────────────────┤
+│ Complex security workflow?          │ → RLM Mode
+├─────────────────────────────────────┤
+│ <100 emails + simple workflow?      │ → Normal Mode + Agent
+└─────────────────────────────────────┘
+```
+
+**Benefits:**
+- No need to manually choose between `gmail_read.py` and `gmail_rlm_repl.py`
+- Prevents wasting RLM budget on small datasets
+- Shows decision reasoning before execution
+
+**Examples:**
+```bash
+# Find action items in today's email (likely <100 emails → Normal Mode)
+.venv/bin/python skills/gmail/scripts/gmail_smart.py analyze "find action items" \
+  --query "newer_than:1d" --max-results 100
+
+# Triage inbox (auto-decides based on actual email count)
+.venv/bin/python skills/gmail/scripts/gmail_smart.py analyze "triage my inbox" \
+  --query "is:inbox newer_than:7d" --max-results 200
+
+# Security analysis (always RLM due to complexity)
+.venv/bin/python skills/gmail/scripts/gmail_smart.py analyze "detect phishing" \
+  --query "newer_than:3d" --max-results 50
+
+# Dry run to see decision without executing
+.venv/bin/python skills/gmail/scripts/gmail_smart.py analyze "summarize" \
+  --query "newer_than:7d" --dry-run
 ```
 
 ### Browser-Based Email Access
@@ -453,3 +502,42 @@ response = client.messages.create(
 **Issue:** Model `claude-3-5-haiku-20241022` shows deprecation warnings.
 
 **Solution:** Update to current models like `claude-sonnet-4-20250514` or `claude-haiku-4-20250514`. Keep `MODEL_PRICING` dict updated with new model costs.
+
+### 5. RLM Mode Misuse for Small Datasets
+
+**Issue:** Claude Code Agent was using RLM mode for simple tasks with small datasets (<100 emails), wasting budget and time.
+
+**Example:** "Find action items in today's email" (79 emails) was routed to `gmail_rlm_repl.py` with `find_action_items()` workflow, when Normal Mode would have been faster and cheaper.
+
+**Root Cause:** Agent defaulted to RLM whenever it saw a pre-built RLM workflow function, without checking email count first.
+
+**Solution (3-layer fix):**
+
+1. **Documentation** (SKILL.md, RLM_AGENT_GUIDE.md):
+   - Added clear decision tree: <100 emails + simple workflow → Normal Mode
+   - Visual flowchart and decision table with examples
+   - Explicit guidance to check email count before mode selection
+
+2. **Programmatic Warning** (gmail_rlm_repl.py):
+   - Script now checks email count + workflow complexity
+   - Exits with helpful error if <100 emails + simple workflow detected
+   - Provides exact command to use Normal Mode instead
+   - Override with `--force` flag if intentional
+
+3. **Smart Dispatcher** (gmail_smart.py - NEW):
+   - Automatically selects Normal vs RLM based on email count, complexity, intent
+   - Shows decision reasoning before execution
+   - Provides `--dry-run` to preview decision without executing
+
+**Decision Matrix:**
+```
+Email Count | Workflow      | Complexity | Mode
+-----------|--------------|------------|-------------
+<100       | send/label   | N/A        | Normal
+<100       | action items | Simple     | Normal + Agent
+<100       | phishing     | Complex    | RLM
+≥100       | any analysis | Any        | RLM
+≥100       | send/label   | N/A        | Normal (batch)
+```
+
+**Best Practice:** For Agent orchestration, always check estimated email count before selecting mode.

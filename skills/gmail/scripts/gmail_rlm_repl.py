@@ -1349,6 +1349,12 @@ Example:
         help="Save checkpoint every N chunks (default: 10)"
     )
 
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force execution even if RLM mode may be overkill (suppress warnings)"
+    )
+
     args = parser.parse_args()
 
     # Validate source-specific arguments
@@ -1492,6 +1498,40 @@ Example:
         else:
             # Load from file
             emails, metadata = load_emails_from_file(args.load_file)
+
+        # Check if RLM mode is being misused (small dataset with simple workflows)
+        if not args.force and len(emails) < 100:
+            # List of simple workflows that could be done in Normal Mode for <100 emails
+            simple_workflows = [
+                'find_action_items',
+                'inbox_triage',
+                'weekly_summary',
+                'sender_analysis'
+            ]
+
+            # Check if code uses any simple workflows
+            using_simple_workflow = any(workflow in code for workflow in simple_workflows)
+
+            if using_simple_workflow:
+                print("", file=sys.stderr)
+                print("⚠️  WARNING: RLM mode may be overkill for this task", file=sys.stderr)
+                print(f"   • Email count: {len(emails)} (< 100)", file=sys.stderr)
+                print(f"   • Detected simple workflow in code", file=sys.stderr)
+                print("", file=sys.stderr)
+                print("💡 RECOMMENDATION: Use Normal Mode instead", file=sys.stderr)
+                print("   1. Fetch emails:", file=sys.stderr)
+                print(f"      .venv/bin/python skills/gmail/scripts/gmail_read.py \\", file=sys.stderr)
+                if args.query:
+                    print(f"        --query \"{args.query}\" \\", file=sys.stderr)
+                print(f"        --max-results {len(emails)} \\", file=sys.stderr)
+                print(f"        --format full", file=sys.stderr)
+                print("", file=sys.stderr)
+                print("   2. Let Claude Code Agent analyze the JSON directly", file=sys.stderr)
+                print("      (faster, cheaper, and simpler for <100 emails)", file=sys.stderr)
+                print("", file=sys.stderr)
+                print("To proceed anyway, use --force flag", file=sys.stderr)
+                print("", file=sys.stderr)
+                sys.exit(1)
 
         # Execute code
         result = execute_rlm_code(code, emails, metadata, args.verbose)

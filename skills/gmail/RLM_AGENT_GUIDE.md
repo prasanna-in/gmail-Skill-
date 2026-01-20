@@ -18,14 +18,26 @@ This document replaces the standalone `gmail_agent.py` module. Instead of callin
 Activate RLM orchestration when the user requests:
 
 ### Trigger Patterns
-- "Triage my inbox" / "Organize my emails"
-- "Summarize my emails" / "What's in my inbox?"
-- "Find action items" / "What do I need to do?"
-- "Analyze security alerts" / "Check for threats"
-- "Find emails from..." / "Search for..." (with analysis intent)
-- "What are the urgent emails?"
-- Any request involving >20 emails or requiring content analysis
-- Security-specific: "Triage alerts", "Find attack chains", "Detect phishing"
+
+**IMPORTANT: First check email count before activating RLM mode!**
+
+Use RLM mode when:
+- **≥100 emails** requiring any analysis (pagination needed)
+- **<100 emails** with **complex** analysis (security_triage, attack_chains, phishing_analysis)
+- **≥100 emails** with simple operations like categorization or summarization
+
+Use Normal Mode + Agent direct analysis when:
+- **<100 emails** with **simple** analysis (find_action_items, inbox_triage, weekly_summary)
+- Agent can fetch with `gmail_read.py` and analyze the JSON directly (faster, cheaper)
+
+**Trigger Keywords:**
+- "Triage my inbox" / "Organize my emails" → Check count first!
+- "Summarize my emails" / "What's in my inbox?" → Check count first!
+- "Find action items" / "What do I need to do?" → Check count first!
+- "Analyze security alerts" / "Check for threats" → Usually RLM (complex)
+- "Find emails from..." / "Search for..." (with analysis intent) → Check count first!
+- "What are the urgent emails?" → Check count first!
+- Security-specific: "Triage alerts", "Find attack chains", "Detect phishing" → Always RLM (complex)
 
 ### Keywords Mapping
 | User Keywords | Recommended Workflow |

@@ -56,6 +56,66 @@ For power users who want full control.
 | Apply label to 5 messages | Normal | Simple batch operation |
 | Custom email analysis logic | RLM (Direct) | Need full Python control |
 
+**Decision Tree: When to Use RLM vs Normal Mode**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ Is it a simple operation?                               │
+│ (send email, apply label, read specific emails)         │
+└──┬─────────────────────────────────────────┬────────────┘
+   │ YES                                     │ NO
+   ▼                                         ▼
+┌──────────────┐                    ┌───────────────────┐
+│ Normal Mode  │                    │ How many emails?  │
+└──────────────┘                    └──┬─────────────┬──┘
+                                       │             │
+                                  <100 │        100+ │
+                                       │             │
+                                       ▼             ▼
+                           ┌──────────────────┐  ┌─────────┐
+                           │ Requires LLM     │  │   RLM   │
+                           │ analysis?        │  │  Mode   │
+                           │ (categorize,     │  └─────────┘
+                           │  summarize,      │
+                           │  extract)        │
+                           └──┬──────────┬────┘
+                              │ NO       │ YES
+                              │          │
+                              ▼          ▼
+                      ┌──────────┐  ┌────────────────┐
+                      │ Normal   │  │ Simple or      │
+                      │ Mode     │  │ Complex?       │
+                      │ (fetch & │  └──┬─────────┬───┘
+                      │ display) │     │ Simple  │ Complex
+                      └──────────┘     │         │
+                                       ▼         ▼
+                               ┌──────────┐  ┌─────────┐
+                               │ Normal   │  │   RLM   │
+                               │ Mode +   │  │  Mode   │
+                               │ Agent    │  └─────────┘
+                               │ analyzes │
+                               └──────────┘
+```
+
+**Examples by Decision Tree:**
+
+| Email Count | Task | Requires LLM? | Complexity | Mode | Reasoning |
+|-------------|------|--------------|------------|------|-----------|
+| 79 | Find action items | Yes | Simple | **Normal + Agent** | <100 emails, simple extraction, Agent can analyze directly |
+| 79 | Send email | No | N/A | **Normal** | Simple operation |
+| 200 | Find action items | Yes | Simple | **RLM** | >100 emails, use pagination |
+| 50 | Triage inbox | Yes | Simple | **Normal + Agent** | <100 emails, Agent can categorize |
+| 500 | Security triage | Yes | Complex | **RLM** | Large dataset + complex workflow |
+| 30 | Read from sender X | No | N/A | **Normal** | Just fetch and display |
+| 150 | Weekly summary | Yes | Simple | **RLM** | >100 emails, needs chunking |
+| 80 | Attack chain detection | Yes | Complex | **RLM** | Complex correlation logic |
+
+**Key Principle:**
+- **<100 emails + simple analysis** → Normal Mode + Agent analyzes the JSON directly (faster, cheaper)
+- **<100 emails + complex analysis** → RLM (security_triage, attack chains need specialized workflows)
+- **≥100 emails** → RLM (pagination required)
+- **Simple operations** → Normal Mode (send, label, read)
+
 ## 🤖 Claude Code Agent Orchestration Guide
 
 **IMPORTANT:** For complex email analysis tasks, Claude Code's Agent should directly orchestrate RLM (Recursive Language Model) operations instead of using subprocess agents. This provides better control, natural dialogue, and cost optimization.
