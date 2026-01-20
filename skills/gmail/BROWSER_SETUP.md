@@ -276,22 +276,37 @@ This runs the core extraction logic directly without the wrapper script.
 
 ## Next Steps
 
-1. **Try the demo:**
+1. **Quick test with mock data:**
    ```bash
-   bash examples/browser_email_poc.sh
+   .venv/bin/python skills/gmail/scripts/browser_email_fetch.py \
+     --url "https://mail.google.com/mail/u/0" \
+     --max-results 10 \
+     --mock \
+     --verbose
    ```
 
-2. **Run real analysis:**
+2. **Run real browser extraction with RLM analysis:**
    ```bash
    .venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
      --source browser \
      --webmail-url "https://mail.google.com/mail/u/0" \
      --browser-session my_work_gmail \
      --max-results 100 \
+     --code "result = inbox_triage(emails); FINAL(result['executive_summary'])"
+   ```
+
+3. **Security alert triage (full body extraction):**
+   ```bash
+   .venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
+     --source browser \
+     --webmail-url "https://mail.google.com/mail/u/0" \
+     --webmail-folder "Security Alerts" \
+     --max-results 100 \
+     --full-body \
      --code "result = security_triage(emails); FINAL(result['executive_summary'])"
    ```
 
-3. **Integrate into workflows:**
+4. **Integrate into workflows:**
    - See `SKILL.md` for agent orchestration patterns
    - See `RLM_AGENT_GUIDE.md` for complete RLM workflows
    - See `examples/agent-conversations.md` for usage examples
