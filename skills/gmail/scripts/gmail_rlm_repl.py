@@ -55,6 +55,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.request
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
@@ -176,7 +177,21 @@ MODEL_PRICING = {
     "claude-3-opus-20240229": {"input": 15.00, "output": 75.00},
     "claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00},
     "claude-haiku-4-20250514": {"input": 1.00, "output": 5.00},
+    # Local model - free (no API cost)
+    "__local__": {"input": 0.0, "output": 0.0},
 }
+
+# Global URL for local OpenAI-compatible model endpoint (None = use Anthropic API)
+_local_model_url: str | None = None
+
+# Default timeout (seconds) for local model inference (overrides llm_query default of 120)
+_local_timeout: int = 240
+
+
+def _strip_think_blocks(text: str) -> str:
+    """Remove <think>...</think> reasoning blocks from model output."""
+    import re
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 DEFAULT_MAX_BUDGET_USD = 5.00
 DEFAULT_MAX_CALLS = 100
@@ -236,6 +251,9 @@ class RLMSession:
 
     def calculate_cost(self) -> float:
         """Calculate total cost based on model pricing."""
+        # Local model has zero API cost
+        if _local_model_url:
+            return 0.0
         pricing = MODEL_PRICING.get(self.model, {"input": 3.00, "output": 15.00})
         input_cost = (self.total_input_tokens / 1_000_000) * pricing["input"]
         output_cost = (self.total_output_tokens / 1_000_000) * pricing["output"]
@@ -324,6 +342,38 @@ def depth_context(session: RLMSession):
         session.current_depth -= 1
 
 
+def _call_local_model(
+    base_url: str,
+    model: str,
+    messages: list,
+    max_tokens: int,
+    timeout: float
+) -> tuple[str, int, int]:
+    """Call an OpenAI-compatible local model endpoint (e.g. llama.cpp, Ollama, LM Studio).
+
+    Returns (content, input_tokens, output_tokens).
+    """
+    url = base_url.rstrip("/") + "/chat/completions"
+    payload = json.dumps({
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    content = data["choices"][0]["message"]["content"]
+    usage = data.get("usage", {})
+    input_tokens = usage.get("prompt_tokens", 0)
+    output_tokens = usage.get("completion_tokens", 0)
+    return content, input_tokens, output_tokens
+
+
 def llm_query(
     prompt: str,
     context: str = None,
@@ -393,45 +443,52 @@ def llm_query(
             session.cache_hits += 1
             if not _skip_status:
                 status_done("Cache hit")
+            if _local_model_url:
+                cached_result = _strip_think_blocks(cached_result)
             return cached_result
         session.cache_misses += 1
 
     try:
         # Track recursion depth
         with depth_context(session):
-            # Initialize Anthropic client (uses ANTHROPIC_API_KEY env var)
-            client = Anthropic()
-
             # Add JSON formatting instruction to prompt if requested
             if json_output:
                 full_prompt = full_prompt + "\n\nIMPORTANT: Respond with valid JSON only. No markdown, no explanation, just the JSON."
 
-            # Build request parameters
-            request_params = {
-                "model": model,
-                "max_tokens": 4096,
-                "messages": [{"role": "user", "content": full_prompt}],
-            }
-
-            # Make API call with timeout
             if not _skip_status:
                 status_async("Querying LLM...")
-            response = client.messages.create(
-                **request_params,
-                timeout=float(timeout)
-            )
 
-            # Track token usage
-            session.add_usage(
-                response.usage.input_tokens,
-                response.usage.output_tokens
-            )
-
-            result = response.content[0].text
+            if _local_model_url:
+                # --- Local OpenAI-compatible endpoint ---
+                # Use _local_timeout unless caller explicitly passed a higher value
+                effective_timeout = max(float(timeout), float(_local_timeout))
+                messages = [{"role": "user", "content": full_prompt}]
+                result, input_tokens, output_tokens = _call_local_model(
+                    _local_model_url, model, messages, 4096, effective_timeout
+                )
+                session.add_usage(input_tokens, output_tokens)
+                result = _strip_think_blocks(result)
+            else:
+                # --- Anthropic API ---
+                client = Anthropic()
+                request_params = {
+                    "model": model,
+                    "max_tokens": 4096,
+                    "messages": [{"role": "user", "content": full_prompt}],
+                }
+                response = client.messages.create(
+                    **request_params,
+                    timeout=float(timeout)
+                )
+                session.add_usage(
+                    response.usage.input_tokens,
+                    response.usage.output_tokens
+                )
+                result = response.content[0].text
 
             # Store in cache
             if use_cache and cache is not None:
-                tokens_used = response.usage.input_tokens + response.usage.output_tokens
+                tokens_used = session.total_input_tokens + session.total_output_tokens
                 cache.set(cache_key, result, tokens_used, model)
 
             if not _skip_status:
@@ -441,17 +498,16 @@ def llm_query(
     except (BudgetExceededError, RecursionDepthExceededError):
         raise  # Re-raise control flow exceptions
     except Exception as e:
-        import traceback
         error_str = str(e)
         error_type = type(e).__name__
 
-        # Check for missing API key (AuthenticationError)
-        if "authentication" in error_str.lower() or "api_key" in error_str.lower():
+        if _local_model_url and ("connection" in error_str.lower() or "refused" in error_str.lower()):
+            return f"[LLM Error: Cannot connect to local model at {_local_model_url}. Is it running?]"
+        elif "authentication" in error_str.lower() or "api_key" in error_str.lower():
             return "[LLM Error: ANTHROPIC_API_KEY not set or invalid. Export it in your environment.]"
         elif "timeout" in error_str.lower():
             return "[LLM Error: Query timed out]"
         else:
-            # Include error type for better debugging
             return f"[LLM Error: {error_type}: {error_str}]"
 
 
@@ -1093,8 +1149,9 @@ def execute_rlm_code(
 
 
 def check_anthropic_api_key() -> bool:
-    """Check if ANTHROPIC_API_KEY is set and valid."""
-    import os
+    """Check if ANTHROPIC_API_KEY is set and valid. Skipped when using a local model."""
+    if _local_model_url:
+        return True  # No API key needed for local model
     api_key = os.environ.get('ANTHROPIC_API_KEY', '')
     if not api_key:
         return False
@@ -1297,6 +1354,31 @@ Example:
         help="Model for LLM sub-queries (default: claude-sonnet-4-20250514)"
     )
 
+    parser.add_argument(
+        "--local-url",
+        type=str,
+        default=None,
+        metavar="URL",
+        help=(
+            "Use a local OpenAI-compatible model instead of Anthropic API "
+            "(e.g. http://localhost:8080/v1). "
+            "No ANTHROPIC_API_KEY required. Pass --model to set the model name "
+            "sent to the local server (default: claude-sonnet-4-20250514)."
+        )
+    )
+
+    parser.add_argument(
+        "--local-timeout",
+        type=int,
+        default=240,
+        metavar="SECONDS",
+        help=(
+            "Timeout in seconds for each local model inference call "
+            "(default: 240). Increase for large prompts or slow hardware. "
+            "Only applies when --local-url is set."
+        )
+    )
+
     # Budget and safety controls
     parser.add_argument(
         "--max-budget",
@@ -1402,6 +1484,12 @@ Example:
             }), file=sys.stderr)
             sys.exit(1)
 
+    # Set local model URL/timeout before the API key check so check_anthropic_api_key() can see it
+    global _local_model_url, _local_timeout
+    if args.local_url:
+        _local_model_url = args.local_url.rstrip("/")
+        _local_timeout = args.local_timeout
+
     # Check for Anthropic API key
     if not check_anthropic_api_key():
         print(json.dumps({
@@ -1418,6 +1506,9 @@ Example:
     if args.no_rlm_framing:
         _default_use_rlm_framing = False
     _default_model = args.model
+
+    if _local_model_url:
+        print(f"[Local model] Using {_local_model_url} | model={args.model} | timeout={_local_timeout}s", file=sys.stderr)
 
     # Initialize session with the specified model and limits
     reset_session(

@@ -778,13 +778,23 @@ RLM (Recursive Language Model) mode enables large-scale email analysis by:
 
 ### RLM Prerequisites
 
-RLM mode requires the `ANTHROPIC_API_KEY` environment variable to be set:
+RLM mode requires **one of** the following:
 
+**Option A — Anthropic API (default):**
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-The API key is used for LLM sub-queries via the Anthropic Python SDK.
+**Option B — Local model (no API key needed):**
+```bash
+# Pass --local-url pointing to any OpenAI-compatible server
+.venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
+  --local-url http://localhost:8080/v1 \
+  --model "your-model-name" \
+  ...
+```
+
+See **Local Model Support** section below for full details.
 
 ### When to Use RLM Mode
 
@@ -850,6 +860,8 @@ FINAL('\\n'.join(summaries))
 - `--code`: Python code to execute in RLM environment
 - `--code-file`: Load code from file instead
 - `--model`: Model for LLM sub-queries (default: claude-sonnet-4-20250514)
+- `--local-url`: Use a local OpenAI-compatible model instead of Anthropic API (e.g. `http://localhost:8080/v1`). No `ANTHROPIC_API_KEY` required.
+- `--local-timeout`: Per-call inference timeout in seconds when using `--local-url` (default: 240). Increase for slow hardware or large prompts.
 - `--json-output`: Return result as JSON with session stats (token usage)
 
 ### Built-in Variables
@@ -1246,6 +1258,109 @@ Historical threat patterns are stored for recurring attack detection (30-day ret
 
 ---
 
+## Local Model Support
+
+RLM mode can use any **OpenAI-compatible local model** (llama.cpp, Ollama, LM Studio, vLLM, hetero-cli, etc.) instead of the Anthropic API.
+
+### When to Use Local Model
+
+Activate local model when user says any of:
+- ✅ "Use the local model" / "use my local LLM"
+- ✅ "No Anthropic API key" / "I don't have an API key"
+- ✅ "Use the model running on localhost" / "use port 8080"
+- ✅ "Run offline" / "don't use cloud AI"
+- ✅ "Use [Ollama/LM Studio/llama.cpp/hetero]"
+- ✅ Any mention of a local server URL (e.g. `localhost:11434`, `localhost:8080`)
+
+### How It Works
+
+- `--local-url` points to the local server's `/v1` base URL
+- `--model` sets the model name sent to the server (check server's `/v1/models` for available names)
+- No `ANTHROPIC_API_KEY` required — budget cost is always `$0.00`
+- `<think>...</think>` reasoning blocks (Qwen3, DeepSeek-R1 style) are automatically stripped from responses
+- All RLM functions work identically (`inbox_triage()`, `security_triage()`, etc.)
+
+### Agent Conversation Pattern
+
+```
+User: "Triage my inbox using the local model"
+
+Agent:
+1. Check local server: curl http://localhost:8080/v1/models
+2. Note the model name (e.g. "hetero-v3")
+3. Execute with --local-url and --local-timeout:
+```
+
+```bash
+.venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
+  --local-url http://localhost:8080/v1 \
+  --model "hetero-v3" \
+  --local-timeout 300 \
+  --query "is:inbox newer_than:7d" \
+  --max-results 100 \
+  --code "result = inbox_triage(emails); FINAL_VAR('result')"
+```
+
+### Common Local Server URLs
+
+| Server | Default URL |
+|--------|-------------|
+| Ollama | `http://localhost:11434/v1` |
+| LM Studio | `http://localhost:1234/v1` |
+| llama.cpp | `http://localhost:8080/v1` |
+| vLLM | `http://localhost:8000/v1` |
+| hetero-cli | `http://localhost:8080/v1` |
+
+### Timeout Guidance
+
+Local models are slower than cloud APIs. Set `--local-timeout` based on model size:
+
+| Model Size | Recommended `--local-timeout` |
+|------------|-------------------------------|
+| 1–7B | 60s (default 240 is fine) |
+| 8–14B | 120s |
+| 15–30B | 300s |
+| 30B+ (thinking models) | 600s |
+
+Thinking models (Qwen3, DeepSeek-R1) generate long reasoning chains before the answer — use higher timeouts.
+
+### Example: Inbox Triage with Local Model
+
+```bash
+.venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
+  --local-url http://localhost:8080/v1 \
+  --model "hetero-v3" \
+  --local-timeout 300 \
+  --query "is:inbox newer_than:7d" \
+  --max-results 100 \
+  --code "result = inbox_triage(emails); FINAL_VAR('result')"
+```
+
+### Example: Security Triage with Local Model
+
+```bash
+.venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
+  --local-url http://localhost:8080/v1 \
+  --model "hetero-v3" \
+  --local-timeout 600 \
+  --query "label:security-alerts newer_than:7d" \
+  --max-results 200 \
+  --max-calls 50 \
+  --code "result = security_triage(emails); FINAL(result['executive_summary'])"
+```
+
+### Startup Verification
+
+Before running, verify the local server is ready:
+```bash
+curl http://localhost:8080/health        # Check model_loaded: true
+curl http://localhost:8080/v1/models     # Check available model names
+```
+
+If `model_loaded` is `false` or the server doesn't respond, ask the user to wait for the model to finish loading before proceeding.
+
+---
+
 ## Implementation Notes
 
 **For Claude:**
@@ -1276,10 +1391,16 @@ Historical threat patterns are stored for recurring attack detection (30-day ret
 
 ## Skill Version
 
-Version: 0.4.0
-Last Updated: 2026-01-19
+Version: 0.5.0
+Last Updated: 2026-02-17
 
 **Changelog:**
+- 0.5.0: Local model support
+  - Added `--local-url` flag — use any OpenAI-compatible local server (Ollama, LM Studio, llama.cpp, vLLM, hetero-cli, etc.)
+  - Added `--local-timeout` flag — per-call timeout for local inference (default: 240s)
+  - Auto-strip `<think>...</think>` blocks from thinking models (Qwen3, DeepSeek-R1)
+  - No `ANTHROPIC_API_KEY` required when using local model
+  - Added trigger patterns and examples in SKILL.md so Agent knows when to use local model
 - 0.4.0: Security-focused RLM enhancements
   - Added `gmail_security_helpers.py` - Security analysis functions (severity, IOCs, MITRE, correlation)
   - Added `gmail_security_workflows.py` - High-level workflows (security_triage, detect_attack_chains, phishing_analysis)
