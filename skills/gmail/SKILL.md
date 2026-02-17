@@ -778,21 +778,16 @@ RLM (Recursive Language Model) mode enables large-scale email analysis by:
 
 ### RLM Prerequisites
 
-RLM mode requires **one of** the following:
+RLM mode **auto-selects the best available LLM**:
 
-**Option A — Anthropic API (default):**
-```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
+```
+Local model server running on localhost?  →  Use it automatically (free, no API key)
+No local server found?                    →  Fall back to Anthropic API (requires ANTHROPIC_API_KEY)
+--no-local flag set?                      →  Force Anthropic API regardless
+--local-url <url> flag set?               →  Use that specific local server
 ```
 
-**Option B — Local model (no API key needed):**
-```bash
-# Pass --local-url pointing to any OpenAI-compatible server
-.venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
-  --local-url http://localhost:8080/v1 \
-  --model "your-model-name" \
-  ...
-```
+No configuration needed in the common case — just start your local model server and run.
 
 See **Local Model Support** section below for full details.
 
@@ -859,9 +854,10 @@ FINAL('\\n'.join(summaries))
 - `--format`: Email format (minimal, metadata, full)
 - `--code`: Python code to execute in RLM environment
 - `--code-file`: Load code from file instead
-- `--model`: Model for LLM sub-queries (default: claude-sonnet-4-20250514)
-- `--local-url`: Use a local OpenAI-compatible model instead of Anthropic API (e.g. `http://localhost:8080/v1`). No `ANTHROPIC_API_KEY` required.
-- `--local-timeout`: Per-call inference timeout in seconds when using `--local-url` (default: 240). Increase for slow hardware or large prompts.
+- `--model`: Model name for LLM sub-queries. Defaults to auto-detected local model name, or `claude-sonnet-4-20250514` for Anthropic.
+- `--local-url`: Override auto-detection — use a specific local server (e.g. `http://localhost:8080/v1`). No `ANTHROPIC_API_KEY` required.
+- `--no-local`: Force Anthropic API even if a local server is detected. Requires `ANTHROPIC_API_KEY`.
+- `--local-timeout`: Per-call inference timeout in seconds for local model (default: 240). Increase for slow hardware or large prompts.
 - `--json-output`: Return result as JSON with session stats (token usage)
 
 ### Built-in Variables
@@ -1262,23 +1258,38 @@ Historical threat patterns are stored for recurring attack detection (30-day ret
 
 RLM mode can use any **OpenAI-compatible local model** (llama.cpp, Ollama, LM Studio, vLLM, hetero-cli, etc.) instead of the Anthropic API.
 
-### When to Use Local Model
+### Auto-Detection (Default Behaviour)
 
-Activate local model when user says any of:
-- ✅ "Use the local model" / "use my local LLM"
-- ✅ "No Anthropic API key" / "I don't have an API key"
-- ✅ "Use the model running on localhost" / "use port 8080"
-- ✅ "Run offline" / "don't use cloud AI"
-- ✅ "Use [Ollama/LM Studio/llama.cpp/hetero]"
-- ✅ Any mention of a local server URL (e.g. `localhost:11434`, `localhost:8080`)
+**The skill automatically uses a local model when one is available** — no flags needed.
 
-### How It Works
+On every RLM run the script probes these ports in order and uses the first that responds:
 
-- `--local-url` points to the local server's `/v1` base URL
-- `--model` sets the model name sent to the server (check server's `/v1/models` for available names)
-- No `ANTHROPIC_API_KEY` required — budget cost is always `$0.00`
-- `<think>...</think>` reasoning blocks (Qwen3, DeepSeek-R1 style) are automatically stripped from responses
-- All RLM functions work identically (`inbox_triage()`, `security_triage()`, etc.)
+| Port | Server |
+|------|--------|
+| 8080 | llama.cpp, hetero-cli |
+| 11434 | Ollama |
+| 1234 | LM Studio |
+| 8000 | vLLM |
+
+The model name is read from the server's `/v1/models` response automatically.
+
+### Override Flags
+
+| Goal | Flag |
+|------|------|
+| Force Anthropic API (ignore local) | `--no-local` |
+| Use a specific local server | `--local-url http://host:port/v1` |
+| Override the model name | `--model my-model` |
+| Longer timeout for slow hardware | `--local-timeout 600` |
+
+### When to Activate Each Path
+
+| Trigger | Action |
+|---------|--------|
+| "use the local model" / "use localhost" | Default — auto-detect already does this |
+| "use Anthropic" / "use Claude API" / "no local" | Add `--no-local` |
+| "use port 11434" / specific URL | Add `--local-url http://localhost:11434/v1` |
+| "no API key" / "run offline" | Default — auto-detect will find local server |
 
 ### Agent Conversation Pattern
 
@@ -1286,16 +1297,27 @@ Activate local model when user says any of:
 User: "Triage my inbox using the local model"
 
 Agent:
-1. Check local server: curl http://localhost:8080/v1/models
-2. Note the model name (e.g. "hetero-v3")
-3. Execute with --local-url and --local-timeout:
+1. Auto-detection is the default — no extra flags needed
+2. Execute normally; script auto-detects the local server:
 ```
 
 ```bash
 .venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
-  --local-url http://localhost:8080/v1 \
-  --model "hetero-v3" \
   --local-timeout 300 \
+  --query "is:inbox newer_than:7d" \
+  --max-results 100 \
+  --code "result = inbox_triage(emails); FINAL_VAR('result')"
+```
+
+```
+User: "Use Anthropic API instead"
+
+Agent: add --no-local:
+```
+
+```bash
+.venv/bin/python skills/gmail/scripts/gmail_rlm_repl.py \
+  --no-local \
   --query "is:inbox newer_than:7d" \
   --max-results 100 \
   --code "result = inbox_triage(emails); FINAL_VAR('result')"
@@ -1391,16 +1413,21 @@ If `model_loaded` is `false` or the server doesn't respond, ask the user to wait
 
 ## Skill Version
 
-Version: 0.5.0
+Version: 0.6.0
 Last Updated: 2026-02-17
 
 **Changelog:**
+- 0.6.0: Auto-detect local model; smart fallback to Anthropic
+  - Local model server auto-detected at startup (probes ports 8080, 11434, 1234, 8000)
+  - Model name read automatically from server's `/v1/models` — no `--model` flag needed
+  - Added `--no-local` flag to force Anthropic API even when local server is present
+  - `--local-url` still supported for explicit server override
+  - No configuration needed: start local server → run skill → auto-detected
 - 0.5.0: Local model support
   - Added `--local-url` flag — use any OpenAI-compatible local server (Ollama, LM Studio, llama.cpp, vLLM, hetero-cli, etc.)
   - Added `--local-timeout` flag — per-call timeout for local inference (default: 240s)
   - Auto-strip `<think>...</think>` blocks from thinking models (Qwen3, DeepSeek-R1)
   - No `ANTHROPIC_API_KEY` required when using local model
-  - Added trigger patterns and examples in SKILL.md so Agent knows when to use local model
 - 0.4.0: Security-focused RLM enhancements
   - Added `gmail_security_helpers.py` - Security analysis functions (severity, IOCs, MITRE, correlation)
   - Added `gmail_security_workflows.py` - High-level workflows (security_triage, detect_attack_chains, phishing_analysis)

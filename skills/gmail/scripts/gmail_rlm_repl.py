@@ -193,6 +193,34 @@ def _strip_think_blocks(text: str) -> str:
     import re
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
+
+# Well-known local model server URLs probed during auto-detection (in priority order)
+_AUTO_DETECT_URLS = [
+    "http://localhost:8080/v1",   # llama.cpp, hetero-cli
+    "http://localhost:11434/v1",  # Ollama
+    "http://localhost:1234/v1",   # LM Studio
+    "http://localhost:8000/v1",   # vLLM
+]
+
+
+def _auto_detect_local_model(timeout: float = 2.0) -> tuple[str, str] | None:
+    """Probe well-known local model server ports.
+
+    Returns (base_url, model_name) for the first responsive server, or None.
+    """
+    for base_url in _AUTO_DETECT_URLS:
+        try:
+            req = urllib.request.Request(base_url + "/models")
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = json.loads(resp.read().decode())
+                models = data.get("data", [])
+                if models:
+                    return base_url, models[0]["id"]
+        except Exception:
+            continue
+    return None
+
+
 DEFAULT_MAX_BUDGET_USD = 5.00
 DEFAULT_MAX_CALLS = 100
 DEFAULT_MAX_DEPTH = 3
@@ -1350,8 +1378,12 @@ Example:
     parser.add_argument(
         "--model",
         type=str,
-        default="claude-sonnet-4-20250514",
-        help="Model for LLM sub-queries (default: claude-sonnet-4-20250514)"
+        default=None,
+        help=(
+            "Model for LLM sub-queries. When using a local server, defaults to the "
+            "first model reported by that server. When using Anthropic API, defaults "
+            "to claude-sonnet-4-20250514."
+        )
     )
 
     parser.add_argument(
@@ -1360,10 +1392,17 @@ Example:
         default=None,
         metavar="URL",
         help=(
-            "Use a local OpenAI-compatible model instead of Anthropic API "
-            "(e.g. http://localhost:8080/v1). "
-            "No ANTHROPIC_API_KEY required. Pass --model to set the model name "
-            "sent to the local server (default: claude-sonnet-4-20250514)."
+            "Use a specific local OpenAI-compatible server (e.g. http://localhost:8080/v1). "
+            "Skips auto-detection. No ANTHROPIC_API_KEY required."
+        )
+    )
+
+    parser.add_argument(
+        "--no-local",
+        action="store_true",
+        help=(
+            "Force Anthropic API even if a local model server is detected. "
+            "Requires ANTHROPIC_API_KEY."
         )
     )
 
@@ -1375,7 +1414,7 @@ Example:
         help=(
             "Timeout in seconds for each local model inference call "
             "(default: 240). Increase for large prompts or slow hardware. "
-            "Only applies when --local-url is set."
+            "Only applies when using a local server."
         )
     )
 
@@ -1484,20 +1523,60 @@ Example:
             }), file=sys.stderr)
             sys.exit(1)
 
-    # Set local model URL/timeout before the API key check so check_anthropic_api_key() can see it
+    # --- Model / endpoint selection (priority order) ---
+    # 1. --no-local  → force Anthropic, skip all local detection
+    # 2. --local-url → use that specific URL explicitly
+    # 3. auto-detect → probe well-known local ports; use first responsive server
+    # 4. fallback    → Anthropic API
     global _local_model_url, _local_timeout
-    if args.local_url:
-        _local_model_url = args.local_url.rstrip("/")
-        _local_timeout = args.local_timeout
+    _local_timeout = args.local_timeout
 
-    # Check for Anthropic API key
+    if args.no_local:
+        # Explicit override: always use Anthropic
+        if args.model is None:
+            args.model = "claude-sonnet-4-20250514"
+        print(f"[Anthropic API] model={args.model} (--no-local)", file=sys.stderr)
+
+    elif args.local_url:
+        # Explicit local URL provided
+        _local_model_url = args.local_url.rstrip("/")
+        if args.model is None:
+            # Try to fetch model name from the server
+            detected = _auto_detect_local_model.__wrapped__ if hasattr(_auto_detect_local_model, "__wrapped__") else None
+            try:
+                req = urllib.request.Request(_local_model_url + "/models")
+                with urllib.request.urlopen(req, timeout=2.0) as resp:
+                    data = json.loads(resp.read().decode())
+                    models = data.get("data", [])
+                    args.model = models[0]["id"] if models else "local-model"
+            except Exception:
+                args.model = "local-model"
+        print(f"[Local model] {_local_model_url} | model={args.model} | timeout={_local_timeout}s", file=sys.stderr)
+
+    else:
+        # Auto-detect: try well-known local ports first
+        detected = _auto_detect_local_model()
+        if detected:
+            detected_url, detected_model = detected
+            _local_model_url = detected_url
+            if args.model is None:
+                args.model = detected_model
+            print(f"[Auto-detected local model] {_local_model_url} | model={args.model} | timeout={_local_timeout}s", file=sys.stderr)
+            print(f"  (Use --no-local to force Anthropic API instead)", file=sys.stderr)
+        else:
+            # No local server found — fall back to Anthropic
+            if args.model is None:
+                args.model = "claude-sonnet-4-20250514"
+
+    # Check for Anthropic API key (skipped automatically when _local_model_url is set)
     if not check_anthropic_api_key():
         print(json.dumps({
             "status": "error",
             "error_type": "ConfigurationError",
             "message": "ANTHROPIC_API_KEY not set. RLM requires an Anthropic API key for LLM sub-queries.\n"
                        "Set it with: export ANTHROPIC_API_KEY='sk-ant-api03-...'\n"
-                       "Get a key at: https://console.anthropic.com/"
+                       "Get a key at: https://console.anthropic.com/\n"
+                       "Or use a local model server (auto-detected from localhost)."
         }), file=sys.stderr)
         sys.exit(1)
 
@@ -1506,9 +1585,6 @@ Example:
     if args.no_rlm_framing:
         _default_use_rlm_framing = False
     _default_model = args.model
-
-    if _local_model_url:
-        print(f"[Local model] Using {_local_model_url} | model={args.model} | timeout={_local_timeout}s", file=sys.stderr)
 
     # Initialize session with the specified model and limits
     reset_session(
